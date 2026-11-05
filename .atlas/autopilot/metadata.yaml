@@ -1,0 +1,106 @@
+version: 1.0
+generated_by: IGT Project Bootstrapper
+project:
+  name: librcsc-denoise
+  has_submodules: false
+  root_path: .
+  checkpoint_mode: per-batch
+unavailable_units: []
+units:
+  - id: main
+    path: .
+    type: main
+    sub_projects: []
+    existing:
+      copilot_instructions: new
+      instructions_dir: new
+      agents_entry: new
+      claude_entry: new
+    copilot_instruction:
+      id: project-root
+      path: .github/copilot-instructions.md
+      description: Root map, build/run, instruction index, PR-review maintenance note
+      depends_on: [player-world-model, action-skills, formation-ann-geom, coach-trainer-clang, net-param-rcg, build-install-tools]
+      action: new
+      progress: verified
+      write_mode: planner
+      last_worker: null
+    instructions:
+      - id: player-world-model
+        name: Player Agent and World Model
+        path: .github/instructions/player-world-model.instructions.md
+        apply_to: "rcsc/player/**,rcsc/common/**"
+        includes: [rcsc/player/, rcsc/common/]
+        description: agent loop, sensors, world model, ServerParam/PlayerType
+        priority: 1
+        depends_on: []
+        action: new
+        progress: verified
+        write_mode: worker
+        last_worker: null
+      - id: action-skills
+        name: Action Skills
+        path: .github/instructions/action-skills.instructions.md
+        apply_to: "rcsc/action/**"
+        includes: [rcsc/action/]
+        description: body/bhv/neck/view skills, kick_table, versioned files
+        priority: 1
+        depends_on: []
+        action: new
+        progress: verified
+        write_mode: worker
+        last_worker: null
+      - id: formation-ann-geom
+        name: Formation, ANN, Geometry
+        path: .github/instructions/formation-ann-geom.instructions.md
+        apply_to: "rcsc/formation/**,rcsc/ann/**,rcsc/geom/**"
+        includes: [rcsc/formation/, rcsc/ann/, rcsc/geom/]
+        description: formation parsers, neural nets, 2D geometry
+        priority: 1
+        depends_on: []
+        action: new
+        progress: verified
+        write_mode: worker
+        last_worker: null
+      - id: coach-trainer-clang
+        name: Coach, Trainer, CLang, Monitor
+        path: .github/instructions/coach-trainer-clang.instructions.md
+        apply_to: "rcsc/coach/**,rcsc/trainer/**,rcsc/clang/**,rcsc/monitor/**"
+        includes: [rcsc/coach/]
+        description: coach/trainer agents and CLang parser
+        priority: 1
+        depends_on: []
+        action: new
+        progress: verified
+        write_mode: worker
+        last_worker: null
+      - id: net-param-rcg
+        name: Net, Param, RCG, GZ
+        path: .github/instructions/net-param-rcg.instructions.md
+        apply_to: "rcsc/net/**,rcsc/param/**,rcsc/rcg/**,rcsc/gz/**,rcsc/time/**"
+        includes: [rcsc/net/]
+        description: sockets, config parsers, rcg log format
+        priority: 1
+        depends_on: []
+        action: new
+        progress: verified
+        write_mode: worker
+        last_worker: null
+      - id: build-install-tools
+        name: Build, Install, CLI Tools
+        path: .github/instructions/build-install-tools.instructions.md
+        apply_to: "CMakeLists.txt,**/CMakeLists.txt,configure.ac,**/Makefile.am,src/**,example/**,librcsc-config.in"
+        includes: [.]
+        description: CMake/autotools, librcsc-config/pc linkage, rcg tools
+        priority: 1
+        depends_on: []
+        action: new
+        progress: verified
+        write_mode: worker
+        last_worker: null
+    entrypoints:
+      - {id: codex-entry, path: AGENTS.md, depends_on: [project-root], action: new, progress: verified, write_mode: planner, last_worker: null}
+      - {id: claude-entry, path: CLAUDE.md, depends_on: [project-root], action: new, progress: verified, write_mode: planner, last_worker: null}
+    skills: []
+    indexes: []
+    scripts: []
