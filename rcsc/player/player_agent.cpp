@@ -42,6 +42,7 @@
 
 #include "localization_default.h"
 
+#include "denoise_logger.h"
 #include "player_command.h"
 #include "say_message_builder.h"
 #include "soccer_action.h"
@@ -143,6 +144,9 @@ struct PlayerAgent::Impl {
     //! intention queue
     SoccerIntention::Ptr intention_;
 
+    //! dataset logger. created only if the option denoise_log_dir is set.
+    std::unique_ptr< DenoiseLogger > denoise_;
+
     /*!
       \brief initialize all members
     */
@@ -201,6 +205,15 @@ struct PlayerAgent::Impl {
       and set the server status to end.
     */
     void sendByeCommand();
+
+    /*!
+      \brief send a raw message to the server. the message is also passed to the dataset logger.
+      \param msg raw message
+      \param is_action_batch true if the message is the command batch composed by the action decision
+      \return the result of AbstractClient::sendMessage()
+     */
+    int sendRaw( const char * msg,
+                 const bool is_action_batch = false );
 
     ////////////////////////////////////
 
@@ -679,6 +692,15 @@ PlayerAgent::PlayerAgent()
 PlayerAgent::~PlayerAgent()
 {
     //cerr << "delete PlayerAgent" << endl;
+
+    // M_impl (which owns the dataset logger) is declared before M_config, M_worldmodel and
+    // M_effector, so it is destroyed after them. The logger reads them, so it must be
+    // closed and destroyed here while all the members are alive.
+    if ( M_impl && M_impl->denoise_ )
+    {
+        M_impl->denoise_->close();
+        M_impl->denoise_.reset();
+    }
 }
 
 /*-------------------------------------------------------------------*/
@@ -842,6 +864,11 @@ PlayerAgent::initImpl( CmdLineParser & cmd_parser )
 
     M_worldmodel.setLocalization( std::shared_ptr< Localization >( new LocalizationDefault() ) );
     M_fullstate_worldmodel.setLocalization( std::shared_ptr< Localization >( new LocalizationDefault() ) );
+
+    if ( ! config().denoiseLogDir().empty() )
+    {
+        M_impl->denoise_.reset( new DenoiseLogger( *this ) );
+    }
 
     return true;
 }
@@ -1144,6 +1171,10 @@ PlayerAgent::finalize()
     {
         M_impl->sendByeCommand();
     }
+    if ( M_impl->denoise_ )
+    {
+        M_impl->denoise_->close();
+    }
 #ifdef PROFILE_SEE
     std::cout << config().teamName() << ' '
               << world().self().unum() << ": "
@@ -1309,7 +1340,7 @@ PlayerAgent::Impl::sendInitCommand()
     }
 
     // send to server
-    if ( agent_.M_client->sendMessage( ostr.str().c_str() ) <= 0 )
+    if ( sendRaw( ostr.str().c_str() ) <= 0 )
     {
         std::cout << agent_.config().teamName()
                   << ": Failed to init ...\nExit ..." << std::endl;
@@ -1379,7 +1410,36 @@ PlayerAgent::Impl::sendSettingCommands()
         dlog.addText( Logger::SYSTEM,
                       "---- send[%s]",
                       ostr.str().c_str() );
-        agent_.M_client->sendMessage( ostr.str().c_str() );
+        sendRaw( ostr.str().c_str() );
+    }
+}
+
+/*-------------------------------------------------------------------*/
+/*!
+
+ */
+int
+PlayerAgent::Impl::sendRaw( const char * msg,
+                            const bool is_action_batch )
+{
+    if ( denoise_ )
+    {
+        denoise_->onSend( msg, is_action_batch, current_time_ );
+    }
+
+    return agent_.M_client->sendMessage( msg );
+}
+
+/*-------------------------------------------------------------------*/
+/*!
+
+ */
+void
+PlayerAgent::addActionLabel( const std::string & label )
+{
+    if ( M_impl->denoise_ )
+    {
+        M_impl->denoise_->addActionLabel( label );
     }
 }
 
@@ -1394,7 +1454,7 @@ PlayerAgent::Impl::sendByeCommand()
     std::ostringstream ostr;
 
     com.toCommandString( ostr );
-    agent_.M_client->sendMessage( ostr.str().c_str() );
+    sendRaw( ostr.str().c_str() );
 
     agent_.M_client->setServerAlive( false );
 }
@@ -1447,6 +1507,9 @@ PlayerAgent::Impl::setDebugFlags()
 void
 PlayerAgent::parse( const char * msg )
 {
+    const long long denoise_recv_msec = ( M_impl->denoise_
+                                          ? DenoiseLogger::nowMsec()
+                                          : 0 );
 
     if ( ! std::strncmp( msg, "(see ", 5 ) )
     {
@@ -1513,6 +1576,11 @@ PlayerAgent::parse( const char * msg )
                   << " Received unsupported message : ["
                   << msg << "]" << std::endl;
     };
+
+    if ( M_impl->denoise_ )
+    {
+        M_impl->denoise_->onReceive( msg, denoise_recv_msec, M_impl->current_time_ );
+    }
 }
 
 /*-------------------------------------------------------------------*/
@@ -2406,6 +2474,17 @@ PlayerAgent::action()
                                                          M_impl->current_time_ );
     }
 
+    // dataset logger. read only snapshot of the world model, sensors and the ground truth.
+    if ( M_impl->denoise_ )
+    {
+        M_impl->denoise_->beginCycle( M_impl->current_time_,
+                                      M_impl->think_received_
+                                      ? "think"
+                                      : world().seeTime() == M_impl->current_time_
+                                      ? "see"
+                                      : "timeout" );
+    }
+
     // reset last action effect
     M_effector.reset();
 
@@ -2443,17 +2522,32 @@ PlayerAgent::action()
 
     // ------------------------------------------------------------------------
     // compose command string, and send it to the rcssserver
+
+    // dataset logger. ActionEffector::makeCommand() deletes the queued command objects,
+    // so the predictions that depend on them are snapshotted here.
+    if ( M_impl->denoise_ )
+    {
+        M_impl->denoise_->preSend();
+    }
+
+    std::string command_batch;
     {
         std::ostringstream ostr;
         M_effector.makeCommand( ostr );
-        const std::string str = ostr.str();
-        if ( str.length() > 0 )
+        command_batch = ostr.str();
+        if ( command_batch.length() > 0 )
         {
             dlog.addText( Logger::SYSTEM,
                           "---- send[%s]",
-                          str.c_str() );
-            M_client->sendMessage( str.c_str() );
+                          command_batch.c_str() );
+            M_impl->sendRaw( command_batch.c_str(), true );
         }
+    }
+
+    // dataset logger. finalize the row with the command batch (predictions were snapshotted by preSend()).
+    if ( M_impl->denoise_ )
+    {
+        M_impl->denoise_->endCycle( command_batch );
     }
 
     // ------------------------------------------------------------------------
@@ -2577,7 +2671,7 @@ PlayerAgent::Impl::adjustSeeSynchNormalMode()
         PlayerChangeViewCommand com( ViewWidth::NORMAL, ViewQuality::HIGH );
         com.toCommandString( ostr );
 
-        agent_.M_client->sendMessage( ostr.str().c_str() );
+        sendRaw( ostr.str().c_str() );
         dlog.addText( Logger::SYSTEM,
                       "---- send[%s] see sync",
                       ostr.str().c_str() );
@@ -2606,7 +2700,7 @@ PlayerAgent::Impl::adjustSeeSynchNormalMode()
             PlayerChangeViewCommand com( ViewWidth::NARROW, ViewQuality::HIGH );
             com.toCommandString( ostr );
 
-            agent_.M_client->sendMessage( ostr.str().c_str() );
+            sendRaw( ostr.str().c_str() );
             dlog.addText( Logger::SYSTEM,
                           "---- send[%s] no sync. change to high",
                           ostr.str().c_str() );
@@ -2628,7 +2722,7 @@ PlayerAgent::Impl::adjustSeeSynchNormalMode()
         PlayerChangeViewCommand com( ViewWidth::NARROW, ViewQuality::LOW );
         com.toCommandString( ostr );
 
-        agent_.M_client->sendMessage( ostr.str().c_str() );
+        sendRaw( ostr.str().c_str() );
         dlog.addText( Logger::SYSTEM,
                       "---- send[%s] prepare see sync",
                       ostr.str().c_str() );
@@ -2668,7 +2762,7 @@ PlayerAgent::Impl::adjustSeeSynchSynchMode()
         PlayerChangeViewCommand com( ViewWidth::NARROW, ViewQuality::HIGH );
         com.toCommandString( ostr );
 
-        agent_.M_client->sendMessage( ostr.str().c_str() );
+        sendRaw( ostr.str().c_str() );
         dlog.addText( Logger::SYSTEM,
                       "---- send[%s] synch_mode. see synch",
                       ostr.str().c_str() );
@@ -2697,7 +2791,7 @@ PlayerAgent::Impl::adjustSeeSynchSynchMode()
             PlayerChangeViewCommand com( ViewWidth::NARROW, ViewQuality::HIGH );
             com.toCommandString( ostr );
 
-            agent_.M_client->sendMessage( ostr.str().c_str() );
+            sendRaw( ostr.str().c_str() );
             dlog.addText( Logger::SYSTEM,
                           "---- send[%s] synch_mode. no sync. change to high",
                           ostr.str().c_str() );
@@ -2719,7 +2813,7 @@ PlayerAgent::Impl::adjustSeeSynchSynchMode()
         PlayerChangeViewCommand com( ViewWidth::NARROW, ViewQuality::LOW );
         com.toCommandString( ostr );
 
-        agent_.M_client->sendMessage( ostr.str().c_str() );
+        sendRaw( ostr.str().c_str() );
         dlog.addText( Logger::SYSTEM,
                       "---- send[%s] synch_mode. prepare see sync",
                       ostr.str().c_str() );

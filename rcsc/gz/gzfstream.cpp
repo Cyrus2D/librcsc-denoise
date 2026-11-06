@@ -203,7 +203,9 @@ gzfilebuf::close() throw()
 #ifdef HAVE_LIBZ
     if ( this->is_open() )
     {
-        flushBuf();
+        const bool is_out = ( M_impl
+                              && ( M_impl->open_mode_ & std::ios_base::out ) );
+        const bool flushed = flushBuf();
         destroyInternalBuffer();
         //std::cerr << "close gzip file" << std::endl;
         if ( ! M_impl )
@@ -218,11 +220,12 @@ gzfilebuf::close() throw()
             return nullptr;
         }
         //std::cerr << "file pointer exist" << std::endl;
-        // TODO: checking close status...
-        gzclose( M_impl->file_ );
+        // failure of the last flush or of gzclose() is reported by returning nullptr
+        const int status = gzclose( M_impl->file_ );
         M_impl->file_ = nullptr;
         M_impl->open_mode_ = static_cast< std::ios_base::openmode >( 0 );
         //std::cerr << "finish close gzip file" << std::endl;
+        return ( status == Z_OK && ( ! is_out || flushed ) ) ? this : nullptr;
     }
 #endif
     return nullptr;

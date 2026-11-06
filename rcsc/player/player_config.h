@@ -85,6 +85,12 @@ private:
     bool M_synch_see; //!< if true, synchronous see mode is used.
     bool M_gaussian_see; //!< gaussian observation mode or not
 
+    // denoise dataset logger (see denoise_logger.h)
+    std::string M_denoise_log_dir; //!< root directory of the dataset logger. empty means disabled.
+    std::string M_denoise_game_id; //!< game id directory name. empty means timestamp + team name.
+    bool M_denoise_log_landmarks; //!< if true, the landmarks table is written.
+    bool M_denoise_log_raw; //!< if true, the raw message stream table is written.
+
     // confidence value
 
     int M_self_pos_count_thr; //!< self position confidence threshold
@@ -333,6 +339,27 @@ public:
       \return gaussian_see mode flag
      */
     bool gaussianSee() const { return M_gaussian_see; }
+
+    /*!
+      \brief get the root directory of the denoise dataset logger
+      \return directory path. empty means the logger is disabled.
+     */
+    const std::string & denoiseLogDir() const { return M_denoise_log_dir; }
+
+    /*!
+      \brief get the game id used as a sub directory name by the dataset logger
+     */
+    const std::string & denoiseGameId() const { return M_denoise_game_id; }
+
+    /*!
+      \brief get the flag to write the landmarks table
+     */
+    bool denoiseLogLandmarks() const { return M_denoise_log_landmarks; }
+
+    /*!
+      \brief get the flag to write the raw message stream table
+     */
+    bool denoiseLogRaw() const { return M_denoise_log_raw; }
 
     // confidence value
 

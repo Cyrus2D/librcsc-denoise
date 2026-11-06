@@ -204,6 +204,14 @@ public:
     const TimeStamp & seeTimeStamp() const;
 
     /*!
+      \brief add a behavior label of this cycle to the denoise dataset logger.
+      labels are written to the action_label column of the agent_cycle table.
+      This method does nothing if the logger is disabled (denoise_log_dir is empty).
+      \param label label string
+    */
+    void addActionLabel( const std::string & label );
+
+    /*!
       \brief register kick command
       \param power command argument: kick power
       \param rel_dir command argument kick direction relative to body angle

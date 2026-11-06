@@ -50,6 +50,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace rcsc {
 
@@ -78,6 +79,49 @@ public:
 
     static const std::size_t MAX_RECORD; //!< max record size
     static const double DIR_STEP; //!< the angle steps for dir confidence
+
+    /*!
+      \brief localization result of the ball in the last see. write-only record for the dataset logger.
+      It is never read by the world model. Valid only if time_ is the current game time.
+      All vectors are in the team coordinate system.
+     */
+    struct SeeBallRecord {
+        GameTime time_; //!< time of the see that made this record
+        bool rpos_valid_ = false; //!< relative position was computed
+        Vector2D rpos_;
+        Vector2D rpos_err_;
+        bool rvel_valid_ = false; //!< relative velocity was computed
+        Vector2D rvel_;
+        Vector2D rvel_err_;
+        bool pos_valid_ = false; //!< global position was computed
+        Vector2D pos_;
+        Vector2D pos_err_;
+        bool vel_valid_ = false; //!< global velocity was computed
+        Vector2D vel_;
+        Vector2D vel_err_;
+        int vel_count_ = 0;
+
+        SeeBallRecord()
+            : time_( -1, 0 )
+          { }
+    };
+
+    /*!
+      \brief localization result of one raw visual player entry. write-only record for the dataset logger.
+      list_: 0 = see opponents, 1 = unknown opponents, 2 = teammates, 3 = unknown teammates,
+      4 = unknown players. index_ is the index in that list of VisualSensor.
+     */
+    struct SeePlayerRecord {
+        int list_ = 0;
+        int index_ = 0;
+        SideID side_ = NEUTRAL;
+        int unum_ = 0;
+        bool goalie_ = false;
+        Vector2D pos_; //!< may be invalid
+        Vector2D rpos_; //!< may be invalid
+        Vector2D vel_; //!< may be invalid
+        double dist_error_ = 0.0;
+    };
 
 private:
 
@@ -114,6 +158,19 @@ private:
     GameTime M_training_time; //!< training start/end time for keepaway
 
     bool M_valid; //!< if this world model is initialized, true.
+
+    // raw self localization output (before blending). write-only record for the dataset logger.
+    GameTime M_self_raw_time; //!< time when the raw self localization was stored
+    Vector2D M_self_raw_pos; //!< raw localized self position (team coordinate system). invalid if not available.
+    Vector2D M_self_raw_pos_error; //!< raw localized self position error
+    double M_self_raw_face; //!< raw estimated self face angle (team coordinate system)
+    double M_self_raw_face_error; //!< raw estimated self face angle error
+    bool M_self_raw_face_valid; //!< true if the raw face is stored at M_self_raw_time
+
+    // localization records of the last see. write-only for the dataset logger.
+    SeeBallRecord M_see_ball_record;
+    GameTime M_see_player_record_time; //!< time of M_see_player_records
+    std::vector< SeePlayerRecord > M_see_player_records;
 
     //////////////////////////////////////////////////
     WorldState::Cont M_states;
@@ -505,6 +562,11 @@ private:
                                    Vector2D & vel_error,
                                    int & vel_count );
 
+    //! add a write-only localization record for the dataset logger
+    void addSeePlayerRecord( const int list,
+                             const int index,
+                             const Localization::PlayerT & player );
+
     /*!
       \brief players localization
       \param see analyzed see info
@@ -725,6 +787,51 @@ public:
        \return const reference to the game time object
      */
     const GameTime & fullstateTime() const { return M_fullstate_time; }
+
+    /*!
+       \brief get the time when the raw self localization was stored (see localizeSelf)
+     */
+    const GameTime & selfRawTime() const { return M_self_raw_time; }
+
+    /*!
+       \brief get the raw localized self position before blending. may be invalid.
+     */
+    const Vector2D & selfRawPos() const { return M_self_raw_pos; }
+
+    /*!
+       \brief get the raw localized self position error before blending
+     */
+    const Vector2D & selfRawPosError() const { return M_self_raw_pos_error; }
+
+    /*!
+       \brief get the raw estimated self face angle before blending
+     */
+    double selfRawFace() const { return M_self_raw_face; }
+
+    /*!
+       \brief get the raw estimated self face angle error before blending
+     */
+    double selfRawFaceError() const { return M_self_raw_face_error; }
+
+    /*!
+       \brief check if the raw face value is stored at selfRawTime()
+     */
+    bool selfRawFaceValid() const { return M_self_raw_face_valid; }
+
+    /*!
+       \brief get the ball localization record of the last see (valid if time_ is the current time)
+     */
+    const SeeBallRecord & seeBallRecord() const { return M_see_ball_record; }
+
+    /*!
+       \brief get the time when the player localization records were made
+     */
+    const GameTime & seePlayerRecordTime() const { return M_see_player_record_time; }
+
+    /*!
+       \brief get the player localization records of the last see
+     */
+    const std::vector< SeePlayerRecord > & seePlayerRecords() const { return M_see_player_records; }
 
     /*!
       \brief get the time value when the last action performed

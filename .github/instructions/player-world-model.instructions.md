@@ -12,7 +12,7 @@ Each cycle, the library (not the subclass) parses server messages into a `WorldM
 
 - `PlayerAgent` (`rcsc/player/player_agent.h:67`) extends `SoccerAgent` and is driven by the online/offline client loop; a client subclass overrides `actionImpl()` to register actions.
 - Each cycle: parse message -> update sensors -> `WorldModel::updateAfterSee/SenseBody` -> `action()` -> `ActionEffector::makeCommand` -> send.
-- **Both see models reach the same parser.** `VisualSensor::parse` has no quantized/Gaussian branch; the only client-side switch is the `(gaussian_see)` setting command.
+- **Both see models reach the same parser.** `VisualSensor::parse` has no quantized/Gaussian branch; the only client-side switch is the `(gaussian_see)` setting command (`gaussian_see` in `PlayerConfig`; with the server param `see_noise_free` the server ignores it for distance).
 - The **noise-rate parameters are carried but never read** by librcsc's player code; the distance error model is the quantization-based object table.
 - Denoising is split across deep-dive files: parsing/localization error bounds, fusion/ghost logic, and say/hear messaging (see **Deep Dives** below).
 - **Open the full file when:** you need the lifecycle/dispatch map or the quantized-vs-Gaussian summary; open a deep-dive file for algorithms and thresholds.
@@ -63,7 +63,8 @@ Server protocol: a player connects with `(init ...)`, receives `(server_param ..
 **Config / parameters (`rcsc/common/`):**
 - `ServerParam` (`server_param.h:55`), `PlayerParam` (`player_param.h:51`), `PlayerType` (`player_type.h:54`) with `PlayerTypeSet` (`player_type.h:876`) for heterogeneous players.
 - `StaminaModel` (`stamina_model.h:44`): members `M_stamina`, `M_effort`, `M_recovery`, `M_capacity`; `init(PlayerType)` (:66), `updateBySenseBody` (:129), `simulateWait` (:198), `simulateDash` (:213).
-- `PlayerConfig` (`player/player_config.h`) holds `synch_see` (:85) and `gaussian_see` (:86, accessor `gaussianSee()` at :335).
+- `PlayerConfig` (`player/player_config.h`) holds `synch_see` (:85) and `gaussian_see` (:86, accessor `gaussianSee()` at :335), plus the dataset-logger options `denoise_log_dir`, `denoise_game_id`, `denoise_log_landmarks`, `denoise_log_raw`.
+- `ServerParam` mirrors the v19 bool params `full_view`, `see_no_fade_unum`, `see_no_fade_all`, `see_noise_free` (`server_param.h` `fullView()` etc., parsed from the server `server_param` message; default false). `full_view` makes the client treat the view as 360° with a `see` every cycle (`ViewWidth::width` returns 360, `SeeState::getNextTiming/isSynch/setViewMode/canSendChangeView` take the synch path with `M_cycles_till_next_see = 1`, `ActionEffector::queuedNextSeeCycles()` returns 1, `WorldModel::updateDirCount` resets all direction counts to 0). Fade flags are server-only and need no client code.
 
 **Interception:** `InterceptTable` (`intercept_table.h:55`) instantiates `InterceptSimulatorSelfV17` by default (`intercept_table.cpp:67`, :353). Other variants (`intercept_simulator_self_v7.h`, `_v13.h`) are present, but this file's default is V17. `InterceptSimulatorPlayer` (`intercept_simulator_player.h:49`) is the per-player simulator class.
 
@@ -85,6 +86,7 @@ Server protocol: a player connects with `(init ...)`, receives `(server_param ..
 
 ## Integration Points
 
+- **Dataset logger hooks (`PlayerAgent`):** `Impl::denoise_` (created in `initImpl` only if `denoise_log_dir` is set) gets `onReceive` in `parse`, `onSend` through `Impl::sendRaw` (which replaces every direct `M_client->sendMessage`), `beginCycle`/`preSend`/`endCycle` around `action()`, `close()` in `finalize` and `~PlayerAgent`; `PlayerAgent::addActionLabel(label)` forwards labels. `WorldModel` keeps write-only records for it (`selfRaw*()`, `seeBallRecord()`, `seePlayerRecords()`); they never feed back into world-model logic. Details: [denoise-dataset](denoise-dataset.instructions.md).
 - **Client loop:** `AbstractClient` / `OnlineClient` / `OfflineClient` (`rcsc/common/`), see [net-param-rcg](net-param-rcg.instructions.md).
 - **Actions and skills:** helios's behaviors call `Body_*` skills; see [action-skills](action-skills.instructions.md).
 - **Helios usage (verified by include scan):** `rcsc/player/player_agent.h` (76 includes), `soccer_action.h` (71), `intercept_table.h` (33), `debug_client.h` (32), `world_model.h` (21), `say_message_builder.h` (11), `soccer_intention.h` (7). The helios entry point is `helios-base-denoise/src/player/main_player.cpp`.

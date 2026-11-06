@@ -1949,6 +1949,11 @@ ActionEffector::queuedNextCanSeeWithTurnNeck( const Vector2D & point,
 int
 ActionEffector::queuedNextSeeCycles() const
 {
+    if ( ServerParam::i().fullView() )
+    {
+        return 1;
+    }
+
     int cycle = M_agent.seeState().cyclesTillNextSee();
     if ( cycle > 0 )
     {

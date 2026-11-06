@@ -19,7 +19,7 @@ Fusion is mostly replace-and-age: a forward model predicts each object, a fresh 
 ## Pipeline (`world_model.cpp`)
 
 - `updateAfterSenseBody` (863-905): `SelfObject::updateAfterSenseBody` then `update()` (733-856): predicts self (`M_self.update`), ball (`M_ball.update`), each player list (remove when pos count invalid); increments `M_dir_count`; clears at BeforeKickOff/AfterGoal; rotates the view-area deque.
-- `updateAfterSee` (1110-1249): `localizeSelf` -> `localizeBall` -> `localizePlayers` -> `updatePlayerType`; then, if `self.posCount()<=10` and quality HIGH, builds a `ViewArea` and runs `checkGhost` + `updateDirCount`. With fullstate it only adds a view area.
+- `updateAfterSee` (1110-1249): `localizeSelf` -> `localizeBall` -> `localizePlayers` -> `updatePlayerType`; then, if `self.posCount()<=10` and quality HIGH, builds a `ViewArea` and runs `checkGhost` + `updateDirCount`. With fullstate it only adds a view area. Under `full_view` (or a 360° view area) `updateDirCount` resets every direction count to 0 each cycle.
 - `updateJustBeforeDecision` (1978-2000): `updateBallByHear`, `updateGoalieByHear`, `updatePlayerByHear`, `updatePlayerStaminaByHear` (see [communication-audio-denoising](communication-audio-denoising.instructions.md)).
 - Count thresholds: set in `player_agent.cpp:828-836`; defaults `player_config.cpp:108-118`: self pos/vel/face 20/10/5, ball pos/rpos/vel 10/5/10, player pos/vel/face 30/5/2. `*Valid()` = count <= threshold.
 

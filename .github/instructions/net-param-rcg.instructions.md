@@ -52,6 +52,7 @@ These modules are protocol- and file-level plumbing. The player/coach/trainer ag
 
 ### Gz (`rcsc/gz/`, no internal dependencies)
 
+- `gzfilebuf::close()` (`gzfstream.cpp`) returns `nullptr` if the last flush (output mode) or `gzclose()` failed, so `gzofstream::close()` sets failbit; callers (e.g. the dataset logger) can detect a failed close.
 - `GZCompressor`/`GZDecompressor` (`gzcompressor.h`), `gzfilebuf`/`gzifstream`/`gzofstream` (`gzfstream.h`), `gzfilterstreambuf`/`gzifilterstream`/`gzofilterstream` (`gzfilterstream.h`). Umbrella `gz.h` is installed.
 
 ### Time (`rcsc/time/`, no internal dependencies)

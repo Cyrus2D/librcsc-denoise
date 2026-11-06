@@ -12,7 +12,7 @@ The parser keeps raw rounded values; `LocalizationDefault` converts them to posi
 
 - `VisualSensor::parse` has no quantized/Gaussian branch. `(gaussian_see)` is sent only if `PlayerConfig::gaussianSee()` (default false), and no code reads the noise rates.
 - Self position uses a grid-point sector-intersection filter over flags (not triangulation). Ball and players are a single polar-to-Cartesian conversion with table error ranges.
-- `ObjectTable` always uses the quantized static/movable tables; under Gaussian a seen distance snaps UP to the next table entry (bias).
+- `ObjectTable` uses the quantized static/movable tables; under Gaussian a seen distance snaps UP to the next table entry (bias). With the server param `see_noise_free` it instead uses the seen distance as the mean with `dist_error = 0.01` (`object_table.h:180-185`, `:211-216`).
 - Player velocity is computed with "Not consider noise"; the self error is NOT added to player position.
 - **Open the full file when:** you change a parser field, an error bound, the see/sense_body timing logic, or add a Gaussian-aware error model.
 
@@ -31,6 +31,7 @@ The parser keeps raw rounded values; `LocalizationDefault` converts them to posi
 ## A2. View width/quality and timing
 
 - `SeeState` (`see_state.cpp`): `M_last_timing` (TIME_0_00 / 50_0 / 22_5 / NOSYNCH), `M_see_count_history`; `getNextTiming` (72-138); `updateBySenseBody` (145-176) forces width/quality to the sensed values; `updateBySee` (183-242); `setNewCycle` (249-275).
+- With `ServerParam::fullView()`: `getNextTiming` and `isSynch` take the synch branch, `canSendChangeView` returns true, `setViewMode` sets `M_cycles_till_next_see = 1` and `M_synch_type = SYNCH_EVERY`, and `ViewWidth::width()` returns 360 (`view_mode.cpp`).
 - `setViewMode` (433-594): in synch mode cycles-till-next-see is 3/2/1 for wide/normal/narrow (439-468). `canSendChangeView` (352-416); `isSynch` (297-312); `S_synch_see_mode` is static (45).
 - `ViewArea` (`view_area.h`): `{width, origin, angle, time}`; `contains(point, dir_thr, vis_dist2)` (152-168), used by ghost checks.
 - `PlayerAgent::analyzeSee` (`player_agent.cpp:1550-1624`): `visual_.parse` (1582), `see_state_.updateBySee` (1589), then `WorldModel::updateAfterSee` only if the see time equals the current time. `analyzeSenseBody` (1631-1663): `body_.parse`, `see_state_.updateBySenseBody`, `updateAfterSenseBody`.
@@ -58,6 +59,7 @@ The parser keeps raw rounded values; `LocalizationDefault` converts them to posi
 
 - Hard-coded tables: static landmarks (166-~557; v18 narrow/normal/wide variants at 558/1167/1628 are unused) and movable (2003-2063; v18 at 2066/2175/2253).
 - `getDistanceRange` / `getLandmarkDistanceRange` (`object_table.h:170-204`) ignore version and view width and call `getStaticObjInfo` (2322) / `getMovableObjInfo` (2353). Lookup is `lower_bound(see_dist - 0.001)`: first entry >= seen distance, no interpolation; returns false past the table end (movable max 148.4).
+- `see_noise_free`: `getDistanceRange`/`getLandmarkDistanceRange` return early with `mean = seen distance`, `error = 0.01` (the server prints the exact distance with 6 significant digits); the table lookup is skipped.
 - Generator `createTable(qstep)` (2490-2531) uses `quantize_dist` (2476) with unquantized min/max; `ObjectTable::create` (2453) is never called.
 - Sample errors: movable ~5% of d (5.0->0.248, 10->0.499, 20.1->1.0, 60.3->3.02, 148.4->7.42); landmarks ~0.05 near, 0.1 @20, 0.25 @50, 0.5 @100. Movable seen-distance grid ~10% apart at large d.
 

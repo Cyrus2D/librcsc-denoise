@@ -6,6 +6,7 @@ add_library(rcsc_player OBJECT
   ball_object.cpp
   body_sensor.cpp
   debug_client.cpp
+  denoise_logger.cpp
   fullstate_sensor.cpp
   intercept.cpp
   intercept_simulator_player.cpp
@@ -43,6 +44,7 @@ install(FILES
   ball_object.h
   body_sensor.h
   debug_client.h
+  denoise_logger.h
   free_message.h
   fullstate_sensor.h
   intercept.h

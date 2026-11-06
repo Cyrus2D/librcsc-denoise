@@ -328,6 +328,13 @@ WorldModel::WorldModel()
       M_game_mode(),
       M_training_time( -1, 0 ),
       M_valid( true ),
+      M_self_raw_time( -1, 0 ),
+      M_self_raw_pos( Vector2D::INVALIDATED ),
+      M_self_raw_pos_error( 0.0, 0.0 ),
+      M_self_raw_face( 0.0 ),
+      M_self_raw_face_error( 0.0 ),
+      M_self_raw_face_valid( false ),
+      M_see_player_record_time( -1, 0 ),
       M_self(),
       M_ball(),
       M_our_goalie_unum( Unum_Unknown ),
@@ -1181,6 +1188,12 @@ WorldModel::updateAfterSee( const VisualSensor & see,
 
     //////////////////////////////////////////////////////////////////
     // ball localization
+    // write-only localization records for the dataset logger. flags are false if the localization fails.
+    M_see_ball_record = SeeBallRecord();
+    M_see_ball_record.time_ = current;
+    M_see_player_records.clear();
+    M_see_player_record_time = current;
+
     localizeBall( see, act, current );
 
     //////////////////////////////////////////////////////////////////
@@ -2199,6 +2212,14 @@ WorldModel::localizeSelf( const VisualSensor & see,
                                ? AngleDeg::normalize_angle( angle_face + 180.0 )
                                : angle_face );
 
+    // record the raw localization output for the dataset logger (never read by the world model)
+    M_self_raw_time = current;
+    M_self_raw_pos = Vector2D::INVALIDATED;
+    M_self_raw_pos_error.assign( 0.0, 0.0 );
+    M_self_raw_face = team_angle_face;
+    M_self_raw_face_error = angle_face_error;
+    M_self_raw_face_valid = true;
+
     //
     // set face dir to self
     //
@@ -2243,6 +2264,10 @@ WorldModel::localizeSelf( const VisualSensor & see,
 
     if ( my_pos.isValid() )
     {
+        // record the raw localization output for the dataset logger
+        M_self_raw_pos = my_pos;
+        M_self_raw_pos_error = my_pos_error;
+
 #ifdef DEBUG_PRINT_SELF_UPDATE
         dlog.addRect( Logger::WORLD,
                       my_pos.x - my_pos_error.x, my_pos.y - my_pos_error.y,
@@ -2281,10 +2306,25 @@ WorldModel::localizeBall( const VisualSensor & see,
     Vector2D rvel( Vector2D::INVALIDATED );
     Vector2D vel_error( 0.0, 0.0 );
 
-    if ( ! M_localize->localizeBallRelative( *this, see,
-                                             self().face().degree(), self().faceError(),
-                                             &rpos, &rpos_error,
-                                             &rvel, &vel_error )  )
+    const bool ball_rel_ok = M_localize->localizeBallRelative( *this, see,
+                                                               self().face().degree(), self().faceError(),
+                                                               &rpos, &rpos_error,
+                                                               &rvel, &vel_error );
+    // write-only record for the dataset logger (vel_error is the relative velocity error here)
+    if ( ball_rel_ok && rpos.isValid() )
+    {
+        M_see_ball_record.rpos_valid_ = true;
+        M_see_ball_record.rpos_ = rpos;
+        M_see_ball_record.rpos_err_ = rpos_error;
+        if ( rvel.isValid() )
+        {
+            M_see_ball_record.rvel_valid_ = true;
+            M_see_ball_record.rvel_ = rvel;
+            M_see_ball_record.rvel_err_ = vel_error;
+        }
+    }
+
+    if ( ! ball_rel_ok )
     {
 #ifdef DEBUG_PRINT_BALL_UPDATE
         dlog.addText( Logger::WORLD,
@@ -2319,6 +2359,12 @@ WorldModel::localizeBall( const VisualSensor & see,
             tvel_err *= ServerParam::i().ballDecay();
             M_ball.updateOnlyVel( tvel, tvel_err, 1 );
 
+            // dataset logger record
+            M_see_ball_record.vel_valid_ = true;
+            M_see_ball_record.vel_ = tvel;
+            M_see_ball_record.vel_err_ = tvel_err;
+            M_see_ball_record.vel_count_ = 1;
+
 #ifdef DEBUG_PRINT_BALL_UPDATE
             dlog.addText( Logger::WORLD,
                           __FILE__" (localizeBall) only vel (%.3f %.3f)",
@@ -2344,6 +2390,11 @@ WorldModel::localizeBall( const VisualSensor & see,
     Vector2D pos_error = self().posError() + rpos_error;
     Vector2D gvel( Vector2D::INVALIDATED );
     int vel_count = 1000;
+
+    // dataset logger record
+    M_see_ball_record.pos_valid_ = true;
+    M_see_ball_record.pos_ = pos;
+    M_see_ball_record.pos_err_ = pos_error;
 
 
 #ifdef DEBUG_PRINT_BALL_UPDATE
@@ -2430,6 +2481,15 @@ WorldModel::localizeBall( const VisualSensor & see,
 
     //////////////////////////////////////////////////////////////////
     // set data
+
+    // dataset logger record
+    if ( gvel.isValid() )
+    {
+        M_see_ball_record.vel_valid_ = true;
+        M_see_ball_record.vel_ = gvel;
+        M_see_ball_record.vel_err_ = vel_error;
+        M_see_ball_record.vel_count_ = vel_count;
+    }
 
     if ( gvel.isValid() )
     {
@@ -2723,6 +2783,29 @@ WorldModel::estimateBallVelByPosDiff( const VisualSensor & see,
 
  */
 void
+WorldModel::addSeePlayerRecord( const int list,
+                                const int index,
+                                const Localization::PlayerT & player )
+{
+    // write-only record for the dataset logger. never read by the world model logic.
+    SeePlayerRecord r;
+    r.list_ = list;
+    r.index_ = index;
+    r.side_ = player.side_;
+    r.unum_ = player.unum_;
+    r.goalie_ = player.goalie_;
+    r.pos_ = player.pos_;
+    r.rpos_ = player.rpos_;
+    r.vel_ = player.vel_;
+    r.dist_error_ = player.dist_error_;
+    M_see_player_records.push_back( r );
+}
+
+/*-------------------------------------------------------------------*/
+/*!
+
+ */
+void
 WorldModel::localizePlayers( const VisualSensor & see )
 {
 #if 0
@@ -2801,8 +2884,10 @@ WorldModel::localizePlayers( const VisualSensor & see )
     //
     // opponent (side & unum)
     //
+    int seen_index_0 = -1; // index in the VisualSensor list (for the dataset logger records)
     for ( const VisualSensor::PlayerT & p : see.opponents() )
     {
+        ++seen_index_0;
         Localization::PlayerT player;
         if ( ! M_localize->localizePlayer( *this,
                                            p,
@@ -2825,6 +2910,7 @@ WorldModel::localizePlayers( const VisualSensor & see )
                       player.pos_.x, player.pos_.y,
                       player.vel_.x, player.vel_.y );
 #endif
+        addSeePlayerRecord( 0, seen_index_0, player );
         // matching, splice or create
         checkTeamPlayer( theirSide(),
                          player,
@@ -2836,8 +2922,10 @@ WorldModel::localizePlayers( const VisualSensor & see )
     //
     // unknown opponent (no uniform number)
     //
+    int seen_index_1 = -1; // index in the VisualSensor list (for the dataset logger records)
     for ( const VisualSensor::PlayerT & p : see.unknownOpponents() )
     {
+        ++seen_index_1;
         Localization::PlayerT player;
         if ( ! M_localize->localizePlayer( *this,
                                            p,
@@ -2857,6 +2945,7 @@ WorldModel::localizePlayers( const VisualSensor & see )
                       " unknown opponent pos=(%.2f, %.2f)",
                       player.pos_.x, player.pos_.y );
 #endif
+        addSeePlayerRecord( 1, seen_index_1, player );
         // matching, splice or create
         checkTeamPlayer( theirSide(),
                          player,
@@ -2868,8 +2957,10 @@ WorldModel::localizePlayers( const VisualSensor & see )
     //
     // teammate (side & unum)
     //
+    int seen_index_2 = -1; // index in the VisualSensor list (for the dataset logger records)
     for ( const VisualSensor::PlayerT & p : see.teammates() )
     {
+        ++seen_index_2;
         Localization::PlayerT player;
         if ( ! M_localize->localizePlayer( *this,
                                            p,
@@ -2892,6 +2983,7 @@ WorldModel::localizePlayers( const VisualSensor & see )
                       player.pos_.x, player.pos_.y,
                       player.vel_.x, player.vel_.y );
 #endif
+        addSeePlayerRecord( 2, seen_index_2, player );
         // matching, splice or create
         checkTeamPlayer( ourSide(),
                          player,
@@ -2903,8 +2995,10 @@ WorldModel::localizePlayers( const VisualSensor & see )
     //
     // unknown teammate (no uniform number)
     //
+    int seen_index_3 = -1; // index in the VisualSensor list (for the dataset logger records)
     for ( const VisualSensor::PlayerT & p : see.unknownTeammates() )
     {
+        ++seen_index_3;
         Localization::PlayerT player;
         if ( ! M_localize->localizePlayer( *this,
                                            p,
@@ -2924,6 +3018,7 @@ WorldModel::localizePlayers( const VisualSensor & see )
                       " unknown teammate pos=(%.2f, %.2f)",
                       player.pos_.x, player.pos_.y );
 #endif
+        addSeePlayerRecord( 3, seen_index_3, player );
         // matching, splice or create
         checkTeamPlayer( ourSide(),
                          player,
@@ -2935,8 +3030,10 @@ WorldModel::localizePlayers( const VisualSensor & see )
     //
     // unknown player
     //
+    int seen_index_4 = -1; // index in the VisualSensor list (for the dataset logger records)
     for ( const VisualSensor::PlayerT & p : see.unknownPlayers() )
     {
+        ++seen_index_4;
         Localization::PlayerT player;
         // localize
         if ( ! M_localize->localizePlayer( *this,
@@ -2957,6 +3054,7 @@ WorldModel::localizePlayers( const VisualSensor & see )
                       " unknown player: pos=(%.2f, %.2f)",
                       player.pos_.x, player.pos_.y );
 #endif
+        addSeePlayerRecord( 4, seen_index_4, player );
         // matching, splice or create
         checkUnknownPlayer( player,
                             M_teammates,
@@ -5480,6 +5578,16 @@ WorldModel::checkGhost( const ViewArea & varea )
 void
 WorldModel::updateDirCount( const ViewArea & varea )
 {
+    if ( ServerParam::i().fullView()
+         || varea.viewWidth() >= 360.0 )
+    {
+        for ( int i = 0; i < DIR_CONF_DIVS; ++i )
+        {
+            M_dir_count[i] = 0;
+        }
+        return;
+    }
+
     const double dir_buf// = DIR_STEP * 0.5;
         = ( ( self().lastMove().isValid()
               && self().lastMove().r() > 0.5 )

@@ -180,6 +180,11 @@ ViewWidth::str() const
 double
 ViewWidth::width( const ViewWidth::Type type )
 {
+    if ( ServerParam::i().fullView() )
+    {
+        return 360.0;
+    }
+
     if ( SeeState::synch_see_mode() )
     {
         double r

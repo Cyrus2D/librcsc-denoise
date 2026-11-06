@@ -72,7 +72,8 @@ SeeState::Timing
 SeeState::getNextTiming( const ViewWidth & vw,
                          const ViewQuality & vq ) const
 {
-    if ( S_synch_see_mode )
+    if ( S_synch_see_mode
+         || ServerParam::i().fullView() )
     {
         return TIME_SYNC;
     }
@@ -296,7 +297,8 @@ SeeState::setLastSeeTiming( const Timing last_timing )
 bool
 SeeState::isSynch() const
 {
-    if ( S_synch_see_mode )
+    if ( S_synch_see_mode
+         || ServerParam::i().fullView() )
     {
         return true;
     }
@@ -355,6 +357,11 @@ SeeState::canSendChangeView( const ViewWidth & next_width,
     //
     // synch mode
     //
+
+    if ( ServerParam::i().fullView() )
+    {
+        return true;
+    }
 
     if ( synch_see_mode() )
     {
@@ -435,6 +442,14 @@ SeeState::setViewMode( const ViewWidth & new_width,
 {
     M_view_width = new_width;
     M_view_quality = new_quality;
+
+    if ( ServerParam::i().fullView() )
+    {
+        // a see message is sent every cycle
+        M_cycles_till_next_see = 1;
+        M_synch_type = SYNCH_EVERY;
+        return;
+    }
 
     if ( synch_see_mode() )
     {

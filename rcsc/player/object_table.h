@@ -33,6 +33,7 @@
 #define RCSC_PLAYER_OBJECT_TABLE_H
 
 #include <rcsc/player/view_mode.h>
+#include <rcsc/common/server_param.h>
 #include <rcsc/geom/vector_2d.h>
 #include <rcsc/types.h>
 
@@ -176,6 +177,13 @@ public:
           // return ( client_version >= 18.0
           //          ? getLandmarkDistanceRangeV18( view_width, quant_dist, mean_dist, dist_error )
           //          : getStaticObjInfo( quant_dist, mean_dist, dist_error ) );
+          if ( ServerParam::i().seeNoiseFree() )
+          {
+              *mean_dist = quant_dist;
+              *dist_error = 0.01;
+              return true;
+          }
+
           return getStaticObjInfo( quant_dist, mean_dist, dist_error );
       }
 
@@ -200,6 +208,13 @@ public:
           // return ( client_version >= 18.0
           //          ? getDistanceRangeV18( view_width, quant_dist, mean_dist, dist_error )
           //          : getMovableObjInfo( quant_dist, mean_dist, dist_error ) );
+          if ( ServerParam::i().seeNoiseFree() )
+          {
+              *mean_dist = quant_dist;
+              *dist_error = 0.01;
+              return true;
+          }
+
           return getMovableObjInfo( quant_dist, mean_dist, dist_error );
       }
 

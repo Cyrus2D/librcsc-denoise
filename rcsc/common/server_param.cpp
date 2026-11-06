@@ -682,6 +682,10 @@ ServerParam::setDefaultParam()
     M_focus_dist_noise_rate = FOCUS_DIST_NOISE_RATE;
     M_land_dist_noise_rate = LAND_DIST_NOISE_RATE;
     M_land_focus_dist_noise_rate = LAND_FOCUS_DIST_NOISE_RATE;
+    M_full_view = false;
+    M_see_no_fade_unum = false;
+    M_see_no_fade_all = false;
+    M_see_noise_free = false;
 
     // XXX
     M_random_seed = -1;
@@ -998,6 +1002,10 @@ ServerParam::createMap()
         ( "focus_dist_noise_rate", "", &M_focus_dist_noise_rate )
         ( "land_dist_noise_rate", "", &M_land_dist_noise_rate )
         ( "land_focus_dist_noise_rate", "", &M_land_focus_dist_noise_rate )
+        ( "full_view", "", &M_full_view )
+        ( "see_no_fade_unum", "", &M_see_no_fade_unum )
+        ( "see_no_fade_all", "", &M_see_no_fade_all )
+        ( "see_noise_free", "", &M_see_noise_free )
         // XXX
         //( "random_seed", "", &M_random_seed )
         ;

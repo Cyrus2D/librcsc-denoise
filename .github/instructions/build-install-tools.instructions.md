@@ -37,6 +37,7 @@ librcsc builds as one shared library (SOVERSION 20) through CMake or autotools, 
 - `configure.ac` options: `--enable-unit-test` (CppUnit >= 1.12.0, `:141-152`), `--enable-debug` (`-DDEBUG`, `:158-165`), `--enable-example` (`:173-180`). `LT_INIT([shared disable-static])` (:27).
 - `AC_CONFIG_FILES` (`:197-223`) lists `librcsc.pc`, `librcsc.spec`, `librcsc-config`, `librcscenv`, and every module Makefile **except `rcsc/action`**.
 - `rcsc/Makefile.am`: `lib_LTLIBRARIES = librcsc.la` whose `LIBADD` pulls in convenience libraries `librcsc_<module>.la` (each module's `Makefile.am` uses `noinst_LTLIBRARIES`). `librcsc_la_LDFLAGS = -version-info 20:0:0`. Installed headers are the same umbrella list, under `$(includedir)/rcsc`.
+- `rcsc/player/denoise_logger.cpp/.h` are listed in both `rcsc/player/CMakeLists.txt` (`rcsc_player` object library and header install list) and `rcsc/player/Makefile.am` (`librcsc_player_la_SOURCES`, `librcsc_playerinclude_HEADERS`); keep both in sync when adding player sources.
 - A commented-out `librcsc_agent.la` block (`rcsc/Makefile.am`) is a leftover from a split-library design.
 
 ### Install layout

@@ -104,6 +104,11 @@ PlayerConfig::setDefaultParam()
     M_synch_see = false;
     M_gaussian_see = false;
 
+    M_denoise_log_dir = "";
+    M_denoise_game_id = "";
+    M_denoise_log_landmarks = true;
+    M_denoise_log_raw = true;
+
     // accuracy threshold
     M_self_pos_count_thr = 20;
     M_self_vel_count_thr = 10;
@@ -217,6 +222,11 @@ PlayerConfig::createParamMap()
         ( "debug_fullstate", "", &M_debug_fullstate )
         ( "synch_see", "", &M_synch_see )
         ( "gaussian_see", "", &M_gaussian_see )
+
+        ( "denoise_log_dir", "", &M_denoise_log_dir, "root directory of the denoise dataset logger. empty means disabled." )
+        ( "denoise_game_id", "", &M_denoise_game_id, "game id directory name for the dataset logger." )
+        ( "denoise_log_landmarks", "", &M_denoise_log_landmarks )
+        ( "denoise_log_raw", "", &M_denoise_log_raw )
 
         ( "self_pos_count_thr", "", &M_self_pos_count_thr )
         ( "self_vel_count_thr", "", &M_self_vel_count_thr )
