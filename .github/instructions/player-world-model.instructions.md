@@ -44,6 +44,18 @@ Server protocol: a player connects with `(init ...)`, receives `(server_param ..
 3. `WorldModel::updateJustAfterDecision`; a view-change command updates `SeeState::setViewMode`.
 4. `M_effector.makeCommand(ostr)` -> `M_client->sendMessage`; then `handleActionEnd`, `clearAllCommands`.
 
+### Exp2 self-position estimator
+
+`PlayerAgent::setSelfPositionEstimator` on `denoise-exp2` registers a callback with
+the current world model and previous serialized action batch. It runs after
+visual localization and before self-related updates and decision caches.
+A finite position in team coordinates replaces only self position for the
+decision. Returning `Vector2D::INVALIDATED` keeps the sensor estimate.
+The dataset snapshot and action generation see the position actually used.
+`PlayerAgent::action` restores the original sensor position after the
+decision so the next sensor update starts from the librcsc estimate.
+The callback does not run on the separate fullstate world model.
+
 **Sensors (`rcsc/player/`):**
 - `VisualSensor` (`visual_sensor.h:50`, `parse` at `visual_sensor.cpp:311`): markers, lines, ball, players (teammate/opponent/unknown lists).
 - `BodySensor` (`body_sensor.h:47`, `parse` at `body_sensor.cpp:91`, `parse2` at :351): stamina, view width/quality, command counters, arm/tackle/collision/foul.

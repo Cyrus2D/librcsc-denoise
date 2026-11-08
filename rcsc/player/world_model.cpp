@@ -1991,6 +1991,14 @@ void
 WorldModel::updateJustBeforeDecision( const ActionEffector & act,
                                       const GameTime & current )
 {
+    updateJustBeforeDecision( act, current, {} );
+}
+
+Vector2D
+WorldModel::updateJustBeforeDecision( const ActionEffector & act,
+                                      const GameTime & current,
+                                      const std::function< Vector2D( const WorldModel & ) > & estimate )
+{
     if ( time() != current )
     {
         update( act, current );
@@ -2006,6 +2014,18 @@ WorldModel::updateJustBeforeDecision( const ActionEffector & act,
     updateBallCollision();
 
     M_ball.updateByGameMode( gameMode() );
+
+    Vector2D baseline( Vector2D::INVALIDATED );
+    if ( estimate )
+    {
+        const Vector2D position = estimate( *this );
+        if ( position.isValid() && std::isfinite( position.x ) && std::isfinite( position.y )
+             && self().posValid() )
+        {
+            baseline = self().pos();
+            M_self.M_pos = position;
+        }
+    }
 
     M_ball.updateSelfRelated( self(), prevBall() );
     M_self.updateBallInfo( ball() );
@@ -2080,6 +2100,16 @@ WorldModel::updateJustBeforeDecision( const ActionEffector & act,
             // vector::erase is O(n), but the size is small, so it is acceptable.
             M_states.erase( M_states.begin() );
         }
+    }
+    return baseline;
+}
+
+void
+WorldModel::restoreDecisionSelfPosition( const Vector2D & baseline )
+{
+    if ( baseline.isValid() )
+    {
+        M_self.M_pos = baseline;
     }
 }
 

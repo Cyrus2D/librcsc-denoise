@@ -146,6 +146,9 @@ struct PlayerAgent::Impl {
 
     //! dataset logger. created only if the option denoise_log_dir is set.
     std::unique_ptr< DenoiseLogger > denoise_;
+    std::function< Vector2D( const WorldModel &, const std::string & ) > self_position_estimator_;
+    std::string last_decision_command_;
+
 
     /*!
       \brief initialize all members
@@ -2426,6 +2429,14 @@ PlayerAgent::Impl::analyzeWarning( const char * msg )
 
  */
 void
+PlayerAgent::setSelfPositionEstimator(
+    std::function< Vector2D( const WorldModel &, const std::string & ) > estimator )
+{
+    M_impl->self_position_estimator_ = std::move( estimator );
+    M_impl->last_decision_command_.clear();
+}
+
+void
 PlayerAgent::action()
 {
     Timer timer;
@@ -2465,8 +2476,15 @@ PlayerAgent::action()
     // ------------------------------------------------------------------------
     // last update
     // update positining matrix, offside line, defense line, etc.
-    M_worldmodel.updateJustBeforeDecision( effector(),
-                                           M_impl->current_time_ );
+    std::function< Vector2D( const WorldModel & ) > estimate;
+    if ( M_impl->self_position_estimator_ )
+    {
+        estimate = [this]( const WorldModel & world ) {
+            return M_impl->self_position_estimator_( world, M_impl->last_decision_command_ );
+        };
+    }
+    const Vector2D baseline
+        = M_worldmodel.updateJustBeforeDecision( effector(), M_impl->current_time_, estimate );
     if ( config().debugFullstate()
          && M_fullstate_worldmodel.isValid() )
     {
@@ -2544,6 +2562,11 @@ PlayerAgent::action()
         }
     }
 
+    if ( M_impl->self_position_estimator_ )
+    {
+        M_impl->last_decision_command_ = command_batch;
+    }
+
     // dataset logger. finalize the row with the command batch (predictions were snapshotted by preSend()).
     if ( M_impl->denoise_ )
     {
@@ -2568,6 +2591,7 @@ PlayerAgent::action()
     // debugger output
     //
     M_impl->printDebug();
+    M_worldmodel.restoreDecisionSelfPosition( baseline );
 
     // delete all command objects and say messages
     M_effector.clearAllCommands();

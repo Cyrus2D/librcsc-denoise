@@ -14,6 +14,7 @@ Client-side library: network, world model, sensors, localization, formations, ge
 - `rcsc/player/` PlayerAgent + WorldModel; `rcsc/common/` ServerParam/PlayerType/clients; `rcsc/net`, `rcsc/param`, `rcsc/rcg`, `rcsc/coach`, `rcsc/trainer`, `rcsc/clang`, `rcsc/formation`, `rcsc/geom`.
 - Noise-rate params are stored in `rcsc/common/player_type.*`; the see parser has no quantized/Gaussian branch (details in player-world-model). The v19 server params `full_view`, `see_no_fade_unum`, `see_no_fade_all`, `see_noise_free` are mirrored in `ServerParam`; `full_view` (360° view, `see` every cycle) and `see_noise_free` (seen distance used with error 0.01) change client behavior.
 - `rcsc/player/denoise_logger.*` is an optional per-agent dataset logger (`--denoise_log_dir`), hooked into `PlayerAgent`; see the denoise-dataset instruction.
+- On `denoise-exp2`, subclasses can register an optional self-position estimator before decision caches are built. Helios owns the model and its configuration. See [Player Agent and World Model](instructions/player-world-model.instructions.md).
 
 ## Build, Test, Run
 - Autotools: `./bootstrap && ./configure --disable-unit-test && make && sudo make install` (README.md; use `--prefix`).

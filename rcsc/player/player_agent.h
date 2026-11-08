@@ -41,6 +41,7 @@
 #include <rcsc/timer.h>
 #include <rcsc/types.h>
 
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -416,6 +417,12 @@ protected:
     */
     virtual
     bool initImpl( CmdLineParser & cmd_parser );
+
+    // Called before decision caches are built, with the previous sent action batch.
+    // Return INVALIDATED to leave the current sensor estimate in use.
+    // An accepted replacement lasts through this decision and command generation.
+    void setSelfPositionEstimator(
+        std::function< Vector2D( const WorldModel &, const std::string & ) > estimator );
 
     /*!
       \brief handle start event

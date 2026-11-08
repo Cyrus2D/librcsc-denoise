@@ -50,6 +50,8 @@ class BallObject;
 //! self object class
 class SelfObject
     : public AbstractPlayerObject {
+    friend class WorldModel;
+
 private:
     //! validation count threshold value for M_pos
     static int S_pos_count_thr;

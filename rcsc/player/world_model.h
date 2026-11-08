@@ -47,6 +47,7 @@
 #include <rcsc/game_time.h>
 #include <rcsc/types.h>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -61,6 +62,7 @@ class FullstateSensor;
 class InterceptSimualtorSelf;
 class Localization;
 class PlayerPredicate;
+class PlayerAgent;
 class PlayerType;
 class VisualSensor;
 
@@ -69,6 +71,8 @@ class VisualSensor;
   \brief player's internal field status
 */
 class WorldModel {
+    friend class PlayerAgent;
+
 public:
 
     enum {
@@ -522,6 +526,11 @@ public:
                        const bool goalie );
 
 private:
+    Vector2D updateJustBeforeDecision( const ActionEffector & act,
+                                      const GameTime & current,
+                                      const std::function< Vector2D( const WorldModel & ) > & estimate );
+    void restoreDecisionSelfPosition( const Vector2D & baseline );
+
     /*!
       \brief self localization
       \param see analyzed see info
