@@ -84,6 +84,7 @@ private:
 
     //! flag to check write mode
     bool M_write_mode;
+    std::size_t M_max_packet_size = 0; //!< optional viewer limit, including NUL
 
     //! main buffer to output all
     std::string M_main_buffer;
@@ -163,6 +164,12 @@ public:
       \brief clear all data
     */
     void clear();
+    //! Drop planner geometry for a dedicated inspection view; preserve comments.
+    void clearDrawings();
+    //! Replace the banner for a dedicated inspection view.
+    void setMessage( const std::string & message ) { if ( M_on ) M_message = message; }
+    //! Optional whole-packet limit. Zero keeps legacy behavior.
+    void setMaxPacketSize( std::size_t bytes ) { M_max_packet_size = bytes; }
 
     /*!
       \brief add formatted string to buffer

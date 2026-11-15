@@ -46,6 +46,8 @@
 #include "player_command.h"
 #include "player_predicate.h"
 
+#include <chrono>
+
 #include <rcsc/common/audio_memory.h>
 #include <rcsc/common/logger.h>
 #include <rcsc/common/player_param.h>
@@ -752,6 +754,7 @@ WorldModel::update( const ActionEffector & act,
         return;
     }
 
+    restoreStateModelObservations();
     M_time = current;
 
     // playmode is updated in updateJustBeforeDecision
@@ -1199,6 +1202,7 @@ WorldModel::updateAfterSee( const VisualSensor & see,
     //////////////////////////////////////////////////////////////////
     // player localization & matching
     localizePlayers( see );
+    if ( M_state_denoiser ) captureStateSight( see );
     updatePlayerType();
 
     //////////////////////////////////////////////////////////////////
@@ -1412,6 +1416,11 @@ void
 WorldModel::updateGameMode( const GameMode & game_mode,
                             const GameTime & current )
 {
+    if ( game_mode.type() != gameMode().type() ) restoreStateModelObservations();
+    if ( M_state_denoiser && game_mode.type() != gameMode().type() )
+        M_state_denoiser->reset();
+    if ( M_player_position_denoiser && game_mode.type() != gameMode().type() )
+        M_player_position_denoiser->reset();
     bool pk_mode = game_mode.isPenaltyKickMode();
 
     if ( ! pk_mode
@@ -2009,6 +2018,16 @@ WorldModel::updateJustBeforeDecision( const ActionEffector & act,
 
     M_ball.updateSelfRelated( self(), prevBall() );
     M_self.updateBallInfo( ball() );
+    if ( M_denoise_debug_enabled ) captureDenoiseDebugStock();
+    if ( M_state_denoiser ) updateDenoisedState( current );
+
+    if ( M_route_corrected_player_positions
+         && M_see_player_record_time == current
+         && M_player_position_denoiser->cycle() == current.cycle()
+         && gameMode().type() == GameMode::PlayOn )
+    {
+        applyPlayerPositionCorrections();
+    }
 
     updatePlayerStateCache();
 
@@ -2806,8 +2825,284 @@ WorldModel::addSeePlayerRecord( const int list,
 
  */
 void
+WorldModel::setStateModel( StateModel model, const bool apply )
+{
+    StateDenoiseOptions options;
+    options.apply_player = options.apply_ball = apply;
+    setStateModel( std::move( model ), options );
+}
+
+void
+WorldModel::setStateModel( StateModel model, const StateDenoiseOptions & options )
+{
+    restoreStateModelObservations();
+    M_exp4_options = options;
+    M_state_denoiser = model ? std::make_unique<StateDenoiser>( std::move( model ) ) : nullptr;
+}
+
+void
+WorldModel::restoreStateModelObservations()
+{
+    if ( M_exp4_ball_saved )
+    {
+        M_ball = M_exp4_stock_ball;
+        M_exp4_ball_saved = false;
+    }
+    for ( auto * list : { &M_teammates, &M_opponents } )
+    {
+        for ( auto & p : *list )
+        {
+            if ( p.unum() < 1 || p.unum() > 11 ) continue;
+            auto & saved = M_exp4_stock_players[p.unum() + ( p.side() == RIGHT ? 11 : 0 )];
+            if ( ! saved.saved ) continue;
+            p.M_vel = saved.vel;
+            p.M_body = saved.body;
+            p.M_vel_count = saved.vel_count;
+            p.M_body_count = saved.body_count;
+            p.M_decision_velocity_corrected = false;
+        }
+    }
+    for ( auto & saved : M_exp4_stock_players ) saved.saved = false;
+}
+
+void
+WorldModel::captureStateSight( const VisualSensor & see )
+{
+    M_state_raw = {};
+    const auto capture = [this]( int id, const VisualSensor::MovableT & raw ) {
+        auto & t = M_state_raw[id];
+        t.seen = true;
+        t.distance = raw.dist_;
+        t.bearing = raw.dir_ * AngleDeg::DEG2RAD;
+        t.motion = raw.has_vel_;
+        t.dchange = raw.dist_chng_;
+        t.achange = raw.dir_chng_;
+    };
+    if ( ! see.balls().empty() && M_see_ball_record.pos_valid_ )
+        capture( 0, see.balls().front() );
+    const auto players = [&]( const auto & list, SideID side ) {
+        for ( const auto & raw : list )
+        {
+            if ( raw.unum_ < 1 || raw.unum_ > 11 ) continue;
+            const int id = raw.unum_ + ( side == RIGHT ? 11 : 0 );
+            capture( id, raw );
+            M_state_raw[id].raw_body = raw.body_ != VisualSensor::DIR_ERR;
+        }
+    };
+    players( see.teammates(), ourSide() );
+    players( see.opponents(), theirSide() );
+}
+
+void
+WorldModel::captureDenoiseDebugStock()
+{
+    M_denoise_debug_stock = {};
+    M_denoise_debug_time = time();
+    M_denoise_debug_kickable = self().isKickable();
+    auto & b = M_denoise_debug_stock[0];
+    if ( ball().posValid() ) b.pos = ball().pos();
+    if ( ball().velValid() ) b.vel = ball().vel();
+    b.pos_count = ball().posCount(); b.vel_count = ball().velCount();
+    for ( const auto * list : { &M_teammates, &M_opponents } )
+    {
+        for ( const auto & player : *list )
+        {
+            if ( player.unum() < 1 || player.unum() > 11 ) continue;
+            auto & p = M_denoise_debug_stock[player.unum() + (player.side() == RIGHT ? 11 : 0)];
+            if ( player.posValid() ) p.pos = player.pos();
+            if ( player.velValid() ) p.vel = player.vel();
+            p.body = player.body().degree(); p.body_valid = player.bodyValid();
+            p.pos_count = player.posCount(); p.vel_count = player.velCount();
+            p.body_count = player.bodyCount();
+        }
+    }
+}
+
+void
+WorldModel::updateDenoisedState( const GameTime & current )
+{
+    M_exp4_records = {};
+    const auto & sp = ServerParam::i();
+    if ( M_see_player_record_time != current || current.stopped() != 0
+         || gameMode().type() != GameMode::PlayOn || ! self().posValid() || ! self().faceValid()
+         || self().unum() < 1 || self().unum() > 11
+         || ! sp.fullView() || ! sp.seeNoFadeUnum() || sp.seeNoFadeAll() || sp.seeNoiseFree()
+         || std::abs( sp.distQuantizeStep() - .1 ) > 1e-8 || sp.playerSayMsgSize() != 0
+         || clientVersion() < 19 || self().viewQuality() != ViewQuality::HIGH )
+    {
+        M_state_denoiser->reset();
+        return;
+    }
+    auto tracks = M_state_raw;
+    auto & b = tracks[0];
+    if ( ball().posValid() ) b.pos = ball().pos();
+    if ( ball().velValid() ) b.vel = ball().vel();
+    b.pos_age = ball().posCount();
+    b.vel_age = ball().velCount();
+
+    std::array<PlayerObject *, 23> players{};
+    for ( auto * list : { &M_teammates, &M_opponents } )
+    {
+        for ( auto & p : *list )
+        {
+            if ( p.unum() < 1 || p.unum() > 11 || ! p.posValid() ) continue;
+            const int id = p.unum() + ( p.side() == RIGHT ? 11 : 0 );
+            auto & t = tracks[id];
+            t.pos = p.pos();
+            if ( p.velValid() ) t.vel = p.vel();
+            t.body = p.body().radian();
+            t.body_valid = p.bodyValid();
+            t.pos_age = p.posCount(); t.vel_age = p.velCount(); t.body_age = p.bodyCount();
+            t.seen = t.seen && p.seenPosCount() == 0 && p.posCount() == 0;
+            players[id] = &p;
+        }
+    }
+    const int self_id = self().unum() + ( ourSide() == RIGHT ? 11 : 0 );
+    auto & own = tracks[self_id];
+    own.pos = self().pos();
+    if ( self().velValid() ) own.vel = self().vel();
+    own.body = self().body().radian();
+    own.body_valid = true;
+    own.pos_age = own.vel_age = own.body_age = 0;
+    M_state_denoiser->update( current.cycle(), self_id, ourSide() == RIGHT, own.pos,
+                              own.vel.isValid() ? own.vel : Vector2D(0, 0), self().face().radian(),
+                              self().focusDist(), self().focusDir().radian(), sp.defaultKickableArea(),
+                              sp.ballDecay(), self().isKickable(), tracks );
+
+    for ( int id = 0; id < 23; ++id )
+    {
+        if ( ( id == 0 ? ! M_exp4_options.ball_enabled : ! M_exp4_options.player_enabled )
+             || ! M_state_denoiser->ready( id ) || ( id && ! players[id] ) ) continue;
+        const auto v = M_state_denoiser->estimate( id );
+        if ( ! std::all_of( v.begin(), v.end(), []( float x ) { return std::isfinite( x ); } ) ) continue;
+        auto & rec = M_exp4_records[id];
+        rec.stock_pos = tracks[id].pos;
+        rec.stock_vel = tracks[id].vel;
+        rec.stock_body_valid = tracks[id].body_valid;
+        rec.stock_body = tracks[id].body * AngleDeg::RAD2DEG;
+        rec.stock_pos_count = tracks[id].pos_age;
+        rec.stock_vel_count = tracks[id].vel_age;
+        rec.stock_body_count = tracks[id].body_age;
+        rec.controlled = M_state_denoiser->input( id ).controlled;
+        rec.owner = M_state_denoiser->input( id ).owner.back();
+        if ( id == 0 )
+        {
+            rec.pos.assign( v[0], v[1] );
+            rec.vel.assign( v[2], v[3] );
+            rec.next_pos.assign( v[4], v[5] );
+            rec.next_vel.assign( v[6], v[7] );
+            rec.pos_applied = M_exp4_options.apply_ball
+                && tracks[0].distance >= M_exp4_options.ball_position_min_dist;
+            rec.vel_applied = M_exp4_options.apply_ball
+                && tracks[0].distance >= M_exp4_options.ball_velocity_min_dist;
+            if ( rec.pos_applied || rec.vel_applied )
+            {
+                M_exp4_stock_ball = M_ball;
+                M_exp4_ball_saved = true;
+                const Vector2D position = rec.pos_applied ? rec.pos : ball().pos();
+                const Vector2D relative = rec.pos_applied ? rec.pos - own.pos : ball().rpos();
+                const Vector2D velocity = rec.vel_applied ? rec.vel : ball().vel();
+                // Decision-only validity; original sensor ages are restored
+                // before any later observation update and logged separately.
+                M_ball.updateByCollision( position, ball().posCount(), relative,
+                                          ball().rposCount(), velocity,
+                                          rec.vel_applied ? std::min( 1, ball().velCount() ) : ball().velCount() );
+                M_ball.updateSelfRelated( self(), prevBall() );
+                M_self.updateBallInfo( ball() );
+            }
+            // Forecasts remain candidates in the log. Every planner uses the
+            // same current-state/decay path until action forecasting is validated.
+        }
+        else
+        {
+            rec.vel.assign( v[0], v[1] );
+            rec.body = std::atan2( v[3], v[2] ) * AngleDeg::RAD2DEG;
+            rec.vel_applied = M_exp4_options.apply_player
+                && tracks[id].distance >= M_exp4_options.player_velocity_min_dist;
+            rec.body_applied = M_exp4_options.apply_player && ! tracks[id].raw_body;
+            if ( rec.vel_applied || rec.body_applied )
+            {
+                auto & player = *players[id];
+                auto & saved = M_exp4_stock_players[id];
+                saved.vel = player.M_vel; saved.vel_count = player.M_vel_count;
+                saved.body = player.M_body; saved.body_count = player.M_body_count;
+                saved.saved = true;
+                if ( rec.vel_applied )
+                {
+                    player.M_vel = rec.vel;
+                    player.M_vel_count = std::min( 1, player.M_vel_count );
+                    player.M_decision_velocity_corrected = true;
+                }
+                if ( rec.body_applied )
+                {
+                    player.M_body = rec.body;
+                    player.M_body_count = std::min( 1, player.M_body_count );
+                }
+            }
+        }
+    }
+}
+
+void
+WorldModel::setPlayerPositionModel( PlayerPositionModel model, const bool apply, const bool route )
+{
+    M_route_corrected_player_positions = model && apply && route;
+    M_player_position_denoiser = model
+        ? std::make_unique<PlayerPositionDenoiser>( std::move( model ), apply )
+        : nullptr;
+}
+
+void
+WorldModel::applyPlayerPositionCorrections()
+{
+    std::array<PlayerObject *, 23> matched{};
+    for ( auto * players : { &M_teammates, &M_opponents } )
+    {
+        for ( auto & player : *players )
+        {
+            if ( player.unum() < 1 || player.unum() > 11
+                 || player.seenPosCount() != 0
+                 || ( M_route_corrected_player_positions && player.posCount() != 0 ) ) continue;
+            const int id = player.unum() + ( player.side() == RIGHT ? 11 : 0 );
+            matched[id] = &player;
+        }
+    }
+    for ( auto & record : M_see_player_records )
+    {
+        if ( ! record.denoised_pos_.isValid() ) continue;
+        const int id = record.unum_ + ( record.side_ == RIGHT ? 11 : 0 );
+        if ( PlayerObject * player = matched[id] )
+        {
+            // Preserve the raw seen position for subsequent motion estimation.
+            player->M_pos = record.denoised_pos_;
+            player->M_decision_position_corrected = M_route_corrected_player_positions;
+            record.denoise_applied_ = true;
+        }
+    }
+}
+
+void
+WorldModel::observePlayerPosition( const SideID side, const VisualSensor::PlayerT & raw,
+                                   const Localization::PlayerT & stock )
+{
+    if ( raw.unum_ < 1 || raw.unum_ > 11 || ! stock.pos_.isValid() ) return;
+    const int id = raw.unum_ + ( side == RIGHT ? 11 : 0 );
+    const auto start = std::chrono::steady_clock::now();
+    auto & record = M_see_player_records.back();
+    record.side_ = side;
+    record.denoised_pos_ = M_player_position_denoiser->observe(
+        id, raw.dist_, raw.dir_ * AngleDeg::DEG2RAD,
+        raw.has_vel_ ? raw.dist_chng_ : 0.0, raw.has_vel_ ? raw.dir_chng_ : 0.0,
+        stock.pos_, stock.vel_ );
+    record.denoise_age_ = M_player_position_denoiser->age( id );
+    record.denoise_us_ = static_cast<int>( std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - start ).count() );
+}
+
+void
 WorldModel::localizePlayers( const VisualSensor & see )
 {
+    bool denoise = false;
 #if 0
     PlayerObjectUpdater updater;
     if ( ! updater.localizePlayers( M_self, see, M_localize,
@@ -2820,6 +3115,27 @@ WorldModel::localizePlayers( const VisualSensor & see )
          || ! self().posValid() )
     {
         return;
+    }
+
+    const auto & server = ServerParam::i();
+    denoise = M_player_position_denoiser && clientVersion() >= 19
+        && server.fullView() && server.seeNoFadeUnum()
+        && ! server.seeNoFadeAll() && ! server.seeNoiseFree()
+        && std::abs( server.distQuantizeStep() - 0.1 ) < 1e-8
+        && server.playerSayMsgSize() == 0 && self().viewQuality() == ViewQuality::HIGH
+        && gameMode().type() == GameMode::PlayOn && M_see_player_record_time.stopped() == 0;
+    if ( denoise )
+    {
+        double limit = server.defaultPlayerSpeedMax();
+        for ( const auto & type : PlayerTypeSet::i().playerTypeMap() )
+            limit = std::max( limit, type.second.playerSpeedMax() );
+        M_player_position_denoiser->begin(
+            M_see_player_record_time.cycle(), self().pos(), self().face().radian(),
+            self().focusDist(), self().focusDir().radian(), limit );
+    }
+    else if ( M_player_position_denoiser )
+    {
+        M_player_position_denoiser->reset();
     }
 
     ////////////////////////////////////////////////////////////////
@@ -2911,6 +3227,7 @@ WorldModel::localizePlayers( const VisualSensor & see )
                       player.vel_.x, player.vel_.y );
 #endif
         addSeePlayerRecord( 0, seen_index_0, player );
+        if ( denoise ) observePlayerPosition( theirSide(), p, player );
         // matching, splice or create
         checkTeamPlayer( theirSide(),
                          player,
@@ -2984,6 +3301,7 @@ WorldModel::localizePlayers( const VisualSensor & see )
                       player.vel_.x, player.vel_.y );
 #endif
         addSeePlayerRecord( 2, seen_index_2, player );
+        if ( denoise ) observePlayerPosition( ourSide(), p, player );
         // matching, splice or create
         checkTeamPlayer( ourSide(),
                          player,
@@ -3185,6 +3503,31 @@ WorldModel::localizePlayers( const VisualSensor & see )
 
 
     //////////////////////////////////////////////////////////////////
+    if ( denoise )
+    {
+        PlayerPositionDenoiser::Tracks tracks;
+        if ( ball().posValid() )
+        {
+            tracks[0].pos = ball().pos();
+            tracks[0].age = ball().posCount();
+            if ( ball().velValid() ) tracks[0].vel = ball().vel();
+        }
+        for ( auto * players : { &M_teammates, &M_opponents } )
+        {
+            for ( auto & player : *players )
+            {
+                if ( player.unum() < 1 || player.unum() > 11 || ! player.posValid() ) continue;
+                const int id = player.unum() + ( player.side() == RIGHT ? 11 : 0 );
+                tracks[id].pos = player.pos();
+                tracks[id].age = player.posCount();
+                if ( player.velValid() ) tracks[id].vel = player.vel();
+            }
+        }
+        M_player_position_denoiser->finish( tracks );
+        if ( M_player_position_denoiser->apply() && ! M_route_corrected_player_positions )
+            applyPlayerPositionCorrections();
+    }
+
     // ghost check is done in checkGhost()
 }
 

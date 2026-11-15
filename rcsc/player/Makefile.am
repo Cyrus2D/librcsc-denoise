@@ -30,6 +30,8 @@ librcsc_player_la_SOURCES = \
 	view_grid_map.cpp \
 	view_mode.cpp \
 	visual_sensor.cpp \
+	state_denoiser.cpp \
+	player_position_denoiser.cpp \
 	world_model.cpp \
 	world_state.cpp
 
@@ -70,6 +72,8 @@ librcsc_playerinclude_HEADERS = \
 	view_grid_map.h \
 	view_mode.h \
 	visual_sensor.h \
+	state_denoiser.h \
+	player_position_denoiser.h \
 	world_model.h \
 	world_state.h
 

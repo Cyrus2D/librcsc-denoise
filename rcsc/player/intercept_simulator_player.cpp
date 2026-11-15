@@ -66,9 +66,7 @@ inline
 Vector2D
 get_vel( const PlayerObject & p )
 {
-    return ( p.velCount() < p.seenVelCount()
-             ? p.vel()
-             : p.seenVel() );
+    return p.decisionVel( p.velCount() < p.seenVelCount() ? p.vel() : p.seenVel() );
 }
 
 /*-------------------------------------------------------------------*/
@@ -190,12 +188,31 @@ InterceptSimulatorPlayer::simulate( const WorldModel & wm,
                                     const PlayerObject & player,
                                     const bool goalie ) const
 {
+    const Vector2D stock = get_pos( player );
+    const Vector2D & position = player.decisionPos( stock );
+    const int reach = simulateFrom( wm, player, goalie, position, player.isKickable( 0.0 ) );
+    if ( player.hasDecisionPositionCorrection() && dlog.isEnabled( Logger::INTERCEPT ) )
+    {
+        const double area = player.playerTypePtr()
+            ? player.playerTypePtr()->kickableArea() : ServerParam::i().defaultKickableArea();
+        const int previous = simulateFrom( wm, player, goalie, stock, stock.dist( wm.ball().pos() ) < area );
+        if ( previous != reach )
+            dlog.addText( Logger::INTERCEPT, "EXP3 reach side=%d unum=%d goalie=%d stock=%d corrected=%d",
+                          player.side(), player.unum(), goalie, previous, reach );
+    }
+    return reach;
+}
+
+int
+InterceptSimulatorPlayer::simulateFrom( const WorldModel & wm, const PlayerObject & player,
+                                        const bool goalie, const Vector2D & position, const bool kickable ) const
+{
     if ( player.posCount() >= 15 )
     {
         return 1000;
     }
 
-    if ( player.isKickable( 0.0 ) )
+    if ( kickable )
     {
         return 0;
     }
@@ -219,7 +236,7 @@ InterceptSimulatorPlayer::simulate( const WorldModel & wm,
 
     const PlayerData data( player,
                            *ptype,
-                           get_pos( player ),
+                           position,
                            get_vel( player ),
                            get_control_area( player, wm, goalie ),
                            get_bonus_step( player, wm.ourSide() ),

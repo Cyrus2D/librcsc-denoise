@@ -2571,6 +2571,9 @@ PlayerAgent::action()
 
     // delete all command objects and say messages
     M_effector.clearAllCommands();
+    // Logging, debug output and command construction see the decision state.
+    // The next incoming sensor message must see the unmodified observation state.
+    M_worldmodel.restoreStateModelObservations();
 }
 
 /*-------------------------------------------------------------------*/

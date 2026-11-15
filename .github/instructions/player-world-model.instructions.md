@@ -114,3 +114,18 @@ Server protocol: a player connects with `(init ...)`, receives `(server_param ..
 - [coach-trainer-clang](coach-trainer-clang.instructions.md)
 - [build-install-tools](build-install-tools.instructions.md)
 - [../copilot-instructions.md](../copilot-instructions.md)
+
+## Soccer Window denoise inspector
+
+The debugger still serializes the decision WM before F4 observation restore.
+WorldModel provides an optional denoiseDebugStock(id) snapshot (0 ball,
+1-11 left, 12-22 right) at the pre-override boundary; player validity masks
+and sensor ages are preserved. The Helios overlay is presentation-only.
+
+DebugClient clearDrawings/setMessage support the dedicated inspector.
+setMaxPacketSize(7800) opts into viewer-compatible bounded packets, banner
+and comment limits and actual stopped counts during BeforeKickOff. Complete
+optional elements are removed to fit; never truncate an S-expression.
+A zero packet limit retains the ordinary debugger behavior. The viewer
+currently limits UDP to 8192 bytes, message text to 1023 and object comments
+to 256; keep protocol tests against the actual viewer parser.

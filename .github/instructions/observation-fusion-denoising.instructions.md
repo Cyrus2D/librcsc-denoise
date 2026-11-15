@@ -23,6 +23,18 @@ Fusion is mostly replace-and-age: a forward model predicts each object, a fresh 
 - `updateJustBeforeDecision` (1978-2000): `updateBallByHear`, `updateGoalieByHear`, `updatePlayerByHear`, `updatePlayerStaminaByHear` (see [communication-audio-denoising](communication-audio-denoising.instructions.md)).
 - Count thresholds: set in `player_agent.cpp:828-836`; defaults `player_config.cpp:108-118`: self pos/vel/face 20/10/5, ball pos/rpos/vel 10/5/10, player pos/vel/face 30/5/2. `*Valid()` = count <= threshold.
 
+## Optional Exp4 decision state
+
+F4 temporarily applies guarded neural ball state and player velocity/body
+after stock sensor fusion, then restores stock values and ages at the end
+of PlayerAgent::action, after logging/debug/command construction. Prediction
+and game-mode updates provide fallback restoration. This prevents learned
+values from changing the sensor history. Do not remove that boundary or
+feed final `trk_*` values back into model feature construction.
+Forecasts are candidates in Exp4 records only; ordinary ball inertia and
+both interception paths retain current-state/decay behavior. See the
+[dataset instruction](denoise-dataset.instructions.md) for flags and logging.
+
 ## Self
 
 - Forward model `SelfObject::update` (`self_object.cpp:200-408`): applies last body command (dash accel, turn moment, move, neck), `pos += vel`, `vel *= playerDecay`; errors: `pos_error/vel_error += playerRand*|vel|` (343-348), `vel_error *= decay`; all counts ++ (369-377).
@@ -70,3 +82,14 @@ Fusion is mostly replace-and-age: a forward model predicts each object, a fresh 
 - [communication-audio-denoising](communication-audio-denoising.instructions.md)
 - [player-world-model](player-world-model.instructions.md)
 - [../copilot-instructions.md](../copilot-instructions.md)
+
+## Optional inspector snapshot
+
+setDenoiseDebugEnabled enables a read-only array of same-cycle WM positions,
+velocities, body validity and ages, captured immediately before
+updateDenoisedState and corrected position application in
+updateJustBeforeDecision. Capture is off by default and independent of model
+readiness, range guards or the dataset logger. It never replaces observation
+history. Use denoiseDebugTime to reject stale snapshots. Fullstate remains a
+presentation-only reference in the Helios helper. Position apply must use
+corrected routing for an inspector baseline before the override.

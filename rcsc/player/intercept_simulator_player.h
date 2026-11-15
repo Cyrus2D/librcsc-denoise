@@ -121,6 +121,8 @@ public:
                   const bool goalie ) const;
 
 private:
+    int simulateFrom( const WorldModel & wm, const PlayerObject & player,
+                      bool goalie, const Vector2D & position, bool kickable ) const;
 
     /*!
       \brief create predicted ball positions

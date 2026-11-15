@@ -35,6 +35,8 @@
 #include <rcsc/player/self_object.h>
 #include <rcsc/player/ball_object.h>
 #include <rcsc/player/player_object.h>
+#include <rcsc/player/player_position_denoiser.h>
+#include <rcsc/player/state_denoiser.h>
 #include <rcsc/player/view_area.h>
 #include <rcsc/player/view_grid_map.h>
 #include <rcsc/player/intercept_table.h>
@@ -111,6 +113,26 @@ public:
       list_: 0 = see opponents, 1 = unknown opponents, 2 = teammates, 3 = unknown teammates,
       4 = unknown players. index_ is the index in that list of VisualSensor.
      */
+    struct Exp4Record {
+        Vector2D pos{Vector2D::INVALIDATED}, vel{Vector2D::INVALIDATED};
+        Vector2D next_pos{Vector2D::INVALIDATED}, next_vel{Vector2D::INVALIDATED};
+        Vector2D stock_pos{Vector2D::INVALIDATED}, stock_vel{Vector2D::INVALIDATED};
+        double body = 0, stock_body = 0;
+        bool stock_body_valid = false;
+        bool body_applied = false, pos_applied = false, vel_applied = false;
+        int stock_pos_count = 1000, stock_vel_count = 1000, stock_body_count = 1000;
+        bool controlled = false;
+        int owner = 0;
+    };
+
+    // Read-only same-cycle WM snapshot immediately before decision overrides.
+    struct DenoiseDebugState {
+        Vector2D pos{Vector2D::INVALIDATED}, vel{Vector2D::INVALIDATED};
+        double body = 0;
+        bool body_valid = false;
+        int pos_count = 1000, vel_count = 1000, body_count = 1000;
+    };
+
     struct SeePlayerRecord {
         int list_ = 0;
         int index_ = 0;
@@ -121,6 +143,10 @@ public:
         Vector2D rpos_; //!< may be invalid
         Vector2D vel_; //!< may be invalid
         double dist_error_ = 0.0;
+        Vector2D denoised_pos_{Vector2D::INVALIDATED};
+        int denoise_age_ = 0;
+        int denoise_us_ = 0;
+        bool denoise_applied_ = false;
     };
 
 private:
@@ -171,6 +197,27 @@ private:
     SeeBallRecord M_see_ball_record;
     GameTime M_see_player_record_time; //!< time of M_see_player_records
     std::vector< SeePlayerRecord > M_see_player_records;
+    std::unique_ptr< PlayerPositionDenoiser > M_player_position_denoiser;
+    bool M_route_corrected_player_positions = false;
+    std::unique_ptr<StateDenoiser> M_state_denoiser;
+    StateDenoiser::Tracks M_state_raw;
+    std::array<Exp4Record, 23> M_exp4_records{};
+    StateDenoiseOptions M_exp4_options;
+    bool M_denoise_debug_enabled = false;
+    GameTime M_denoise_debug_time{-1, 0};
+    std::array<DenoiseDebugState, 23> M_denoise_debug_stock{};
+    bool M_denoise_debug_kickable = false;
+    void captureDenoiseDebugStock();
+    // Decision overrides never become the next sensor-estimation history.
+    BallObject M_exp4_stock_ball;
+    bool M_exp4_ball_saved = false;
+    struct Exp4PlayerSnapshot {
+        Vector2D vel;
+        AngleDeg body;
+        int vel_count = 1000, body_count = 1000;
+        bool saved = false;
+    };
+    std::array<Exp4PlayerSnapshot, 23> M_exp4_stock_players{};
 
     //////////////////////////////////////////////////
     WorldState::Cont M_states;
@@ -356,6 +403,23 @@ public:
       \param localization pointer to the localization instance.
     */
     void setLocalization( std::shared_ptr< Localization > localization );
+    void setPlayerPositionModel( PlayerPositionModel model, bool apply, bool route = false );
+    void setStateModel( StateModel model, bool apply );
+    bool stateModelEnabled() const { return bool( M_state_denoiser ); }
+    void setStateModel( StateModel model, const StateDenoiseOptions & options );
+    bool stateModelApplies() const {
+        return M_state_denoiser && ( ( M_exp4_options.player_enabled && M_exp4_options.apply_player )
+                                    || ( M_exp4_options.ball_enabled && M_exp4_options.apply_ball ) );
+    }
+    const StateDenoiseOptions & stateModelOptions() const { return M_exp4_options; }
+    // Called after action logging, with a fallback before the next update.
+    void restoreStateModelObservations();
+    const Exp4Record & exp4Record( int id ) const { return M_exp4_records[id]; }
+    bool routesCorrectedPlayerPositions() const { return M_route_corrected_player_positions; }
+    void setDenoiseDebugEnabled( bool enabled ) { M_denoise_debug_enabled = enabled; }
+    const GameTime & denoiseDebugTime() const { return M_denoise_debug_time; }
+    const DenoiseDebugState & denoiseDebugStock( int id ) const { return M_denoise_debug_stock.at(id); }
+    bool denoiseDebugStockKickable() const { return M_denoise_debug_kickable; }
 
     /*!
       \brief set intercept simuator.
@@ -573,6 +637,11 @@ private:
       \param current current game time
     */
     void localizePlayers( const VisualSensor & see );
+    void applyPlayerPositionCorrections();
+    void captureStateSight( const VisualSensor & see );
+    void updateDenoisedState( const GameTime & current );
+    void observePlayerPosition( SideID side, const VisualSensor::PlayerT & raw,
+                                const Localization::PlayerT & stock );
 
     /*!
       \brief check player that has team info

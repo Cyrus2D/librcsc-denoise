@@ -259,6 +259,8 @@ PlayerObject::updateBySee( const SideID side,
         M_vel_count = 1000;
     }
 
+    M_decision_position_corrected = false;
+    M_decision_velocity_corrected = false;
     M_pos = p.pos_;
     M_seen_pos = p.pos_;
 
@@ -324,6 +326,8 @@ PlayerObject::updateByFullstate( const FullstateSensor::PlayerT & p,
     M_unum_count = 0;
     M_goalie = p.goalie_;
 
+    M_decision_position_corrected = false;
+    M_decision_velocity_corrected = false;
     M_pos = p.pos_;
     M_pos_count = 0;
 

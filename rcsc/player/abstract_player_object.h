@@ -70,6 +70,8 @@ protected:
 
     Vector2D M_pos; //!< global coordinate
     int M_pos_count; //!< main accuracy counter
+    bool M_decision_position_corrected = false;
+    bool M_decision_velocity_corrected = false;
 
     Vector2D M_seen_pos; //!< last seen global coordinate
     int M_seen_pos_count; //!< count since last observation
@@ -286,6 +288,23 @@ public:
     const Vector2D & pos() const
     {
         return M_pos;
+    }
+
+    const Vector2D & decisionVel( const Vector2D & fallback ) const
+    {
+        return M_decision_velocity_corrected && M_pos_count == 0 ? M_vel : fallback;
+    }
+
+    //! Whether the current decision uses a fresh denoised position.
+    bool hasDecisionPositionCorrection() const
+    {
+        return M_decision_position_corrected && M_pos_count == 0;
+    }
+
+    //! Prefer the current correction while preserving each caller's stock fallback.
+    const Vector2D & decisionPos( const Vector2D & fallback ) const
+    {
+        return hasDecisionPositionCorrection() ? M_pos : fallback;
     }
 
     /*!

@@ -682,6 +682,10 @@ ServerParam::setDefaultParam()
     M_focus_dist_noise_rate = FOCUS_DIST_NOISE_RATE;
     M_land_dist_noise_rate = LAND_DIST_NOISE_RATE;
     M_land_focus_dist_noise_rate = LAND_FOCUS_DIST_NOISE_RATE;
+    M_randomize_player_commands = false;
+    M_command_order_seed = -1;
+    M_command_order_log = false;
+    M_simulator_random_seed = -1;
     M_full_view = false;
     M_see_no_fade_unum = false;
     M_see_no_fade_all = false;
@@ -1002,6 +1006,10 @@ ServerParam::createMap()
         ( "focus_dist_noise_rate", "", &M_focus_dist_noise_rate )
         ( "land_dist_noise_rate", "", &M_land_dist_noise_rate )
         ( "land_focus_dist_noise_rate", "", &M_land_focus_dist_noise_rate )
+        ( "randomize_player_commands", "", &M_randomize_player_commands )
+        ( "command_order_seed", "", &M_command_order_seed )
+        ( "command_order_log", "", &M_command_order_log )
+        ( "random_seed", "", &M_simulator_random_seed )
         ( "full_view", "", &M_full_view )
         ( "see_no_fade_unum", "", &M_see_no_fade_unum )
         ( "see_no_fade_all", "", &M_see_no_fade_all )

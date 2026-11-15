@@ -62,6 +62,7 @@ public:
 
 
 private:
+    friend class WorldModel;
     //! validation count threshold value for M_pos and M_rpos
     static int S_pos_count_thr;
     //! validation count threshold value for M_vel

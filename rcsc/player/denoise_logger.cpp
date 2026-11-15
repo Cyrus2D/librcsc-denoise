@@ -88,7 +88,7 @@
 
 namespace rcsc {
 
-const int DenoiseLogger::SCHEMA_VERSION = 2;
+const int DenoiseLogger::SCHEMA_VERSION = 3;
 
 namespace {
 
@@ -177,7 +177,13 @@ const char * const COLS_OBJECTS =
     "trk_pos_count,trk_seen_pos_count,trk_vel_count,trk_seen_vel_count,trk_body_count,trk_face_count,"
     "trk_is_ghost,trk_ghost_count,trk_lost_count,"
     "trk_heard_pos_x,trk_heard_pos_y,trk_heard_pos_count,trk_heard_vel_x,trk_heard_vel_y,trk_heard_vel_count,"
-    "trk_dist_from_self,trk_angle_from_self";
+    "trk_dist_from_self,trk_angle_from_self,"
+    "denoise_pos_x,denoise_pos_y,denoise_age,denoise_us,denoise_applied,"
+    "exp4_pos_x,exp4_pos_y,exp4_vel_x,exp4_vel_y,exp4_body,exp4_body_applied,"
+    "exp4_next_pos_x,exp4_next_pos_y,exp4_next_vel_x,exp4_next_vel_y,"
+    "exp4_stock_pos_x,exp4_stock_pos_y,exp4_stock_vel_x,exp4_stock_vel_y,exp4_stock_body,exp4_applied,"
+    "exp4_pos_applied,exp4_vel_applied,exp4_forecast_applied,"
+    "exp4_stock_pos_count,exp4_stock_vel_count,exp4_stock_body_count,exp4_controlled,exp4_owner";
 
 const char * const COLS_LANDMARKS =
     DN_KEYS ","
@@ -1289,6 +1295,19 @@ DenoiseLogger::Impl::writeMeta( const bool final_write )
     os << "    \"synch_see\": " << ( cfg.synchSee() ? "true" : "false" ) << ",\n";
     os << "    \"denoise_log_landmarks\": " << ( cfg.denoiseLogLandmarks() ? "true" : "false" ) << ",\n";
     os << "    \"denoise_log_raw\": " << ( cfg.denoiseLogRaw() ? "true" : "false" ) << ",\n";
+    os << "    \"player_position_routing\": \""
+       << ( wm.routesCorrectedPlayerPositions() ? "corrected" : "legacy" ) << "\",\n";
+    os << "    \"exp4_state\": \""
+       << ( wm.stateModelApplies() ? "apply" : wm.stateModelEnabled() ? "shadow" : "off" ) << "\",\n";
+    const auto & state_options = wm.stateModelOptions();
+    const auto state_mode = []( bool enabled, bool apply ) { return !enabled ? "off" : apply ? "apply" : "shadow"; };
+    os << "    \"exp4_integration\": \"f4-isolated-observations\",\n";
+    os << "    \"exp4_player_state\": \"" << state_mode( wm.stateModelEnabled() && state_options.player_enabled, state_options.apply_player ) << "\",\n";
+    os << "    \"exp4_ball_state\": \"" << state_mode( wm.stateModelEnabled() && state_options.ball_enabled, state_options.apply_ball ) << "\",\n";
+    os << "    \"exp4_forecast_state\": \"" << ( wm.stateModelEnabled() && state_options.ball_enabled ? "shadow" : "off" ) << "\",\n";
+    os << "    \"exp4_player_velocity_min_dist\": " << state_options.player_velocity_min_dist << ",\n";
+    os << "    \"exp4_ball_position_min_dist\": " << state_options.ball_position_min_dist << ",\n";
+    os << "    \"exp4_ball_velocity_min_dist\": " << state_options.ball_velocity_min_dist << ",\n";
     os << "    \"full_view\": " << ( ServerParam::i().fullView() ? "true" : "false" ) << ",\n";
     os << "    \"see_noise_free\": " << ( ServerParam::i().seeNoiseFree() ? "true" : "false" ) << "\n";
     os << "  },\n";
@@ -1990,6 +2009,34 @@ DenoiseLogger::Impl::writeObjects()
         const TruthObj & o = truth_[id];
 
         Row r( SCHEMA_OBJECTS );
+        const auto & state = wm.exp4Record( id );
+        if ( state.vel.isValid() )
+        {
+            r.xy( "exp4_vel_x", "exp4_vel_y", g( state.vel ) )
+                .xy( "exp4_stock_pos_x", "exp4_stock_pos_y", g( state.stock_pos ) )
+                .xy( "exp4_stock_vel_x", "exp4_stock_vel_y", g( state.stock_vel ) )
+                .b( "exp4_applied", state.pos_applied || state.vel_applied || state.body_applied )
+                .b( "exp4_pos_applied", state.pos_applied )
+                .b( "exp4_vel_applied", state.vel_applied )
+                .b( "exp4_forecast_applied", false )
+                .i( "exp4_stock_pos_count", state.stock_pos_count )
+                .i( "exp4_stock_vel_count", state.stock_vel_count )
+                .i( "exp4_stock_body_count", state.stock_body_count )
+                .b( "exp4_controlled", state.controlled )
+                .i( "exp4_owner", state.owner );
+            if ( id == 0 )
+            {
+                r.xy( "exp4_pos_x", "exp4_pos_y", g( state.pos ) )
+                    .xy( "exp4_next_pos_x", "exp4_next_pos_y", g( state.next_pos ) )
+                    .xy( "exp4_next_vel_x", "exp4_next_vel_y", g( state.next_vel ) );
+            }
+            else
+            {
+                r.d( "exp4_body", ga( state.body ) ).b( "exp4_body_applied", state.body_applied );
+                if ( state.stock_body_valid ) r.d( "exp4_stock_body", ga( state.stock_body ) );
+            }
+        }
+
         keys( r, cur_ );
         r.i( "object_id", id );
 
@@ -2150,6 +2197,14 @@ DenoiseLogger::Impl::writeObjects()
                             .xy( "ls_pos_x", "ls_pos_y", g( lp.pos_ ) )
                             .xy( "ls_vel_x", "ls_vel_y", g( lp.vel_ ) )
                             .d( "ls_dist_error", lp.dist_error_ );
+                        if ( lp.denoise_age_ > 0 )
+                        {
+                            r.i( "denoise_age", lp.denoise_age_ )
+                                .i( "denoise_us", lp.denoise_us_ )
+                                .b( "denoise_applied", lp.denoise_applied_ );
+                            if ( lp.denoised_pos_.isValid() )
+                                r.xy( "denoise_pos_x", "denoise_pos_y", g( lp.denoised_pos_ ) );
+                        }
                         if ( tru_obj )
                         {
                             r.dxy( "n_ls_rpos_dx", "n_ls_rpos_dy", "n_ls_rpos_d", g( lp.rpos_ ), o.pos_ - me.pos_ )

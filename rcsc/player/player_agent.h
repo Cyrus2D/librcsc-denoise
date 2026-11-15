@@ -74,6 +74,23 @@ private:
     std::unique_ptr< Impl > M_impl;
 
 protected:
+    void setDenoiseDebugEnabled( bool enabled ) { M_worldmodel.setDenoiseDebugEnabled( enabled ); }
+    void setStateModel( StateModel model, bool apply )
+      {
+          M_worldmodel.setStateModel( std::move( model ), apply );
+      }
+
+    void setStateModel( StateModel model, const StateDenoiseOptions & options )
+      {
+          M_worldmodel.setStateModel( std::move( model ), options );
+      }
+
+    //! Register a client-owned model on the observation world model.
+    void setPlayerPositionModel( PlayerPositionModel model, bool apply, bool route = false )
+      {
+          M_worldmodel.setPlayerPositionModel( std::move( model ), apply, route );
+      }
+
 
     //! configuration parameter set
     PlayerConfig M_config;

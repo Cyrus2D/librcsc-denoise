@@ -4,9 +4,65 @@ applyTo: "rcsc/player/denoise_logger.*,rcsc/player/player_agent.*,rcsc/player/pl
 
 # Denoise Dataset Logger (`rcsc::DenoiseLogger`) - Data Dictionary
 
+## Exp3 player position model
+
+When the client registers Step 26, `objects.csv.gz` includes five additive
+columns for the matched raw visual record. `denoise_pos_x/y` are the
+candidate coordinates in the same global frame as `ls_pos_x/y`.
+`denoise_age` is consecutive observation age capped at 10.
+`denoise_us` is per-target feature/geometry and inference time in
+microseconds. `denoise_applied` marks a candidate written to the tracked
+position. Stock `ls_pos_x/y` and the final `trk_pos_x/y` retain their
+meanings. An active record with age below eight has no candidate.
+Off-mode and out-of-scope rows leave all five columns empty.
+In Step 30 corrected routing, a candidate can be logged with
+`denoise_applied=0` when a referee update ends PlayOn between the
+visual observation and the decision. The selected routing is recorded as
+`config.player_position_routing` in `meta.json`.
+
+## Exp4 state model (schema 3, F4)
+
+The client loads model files; librcsc builds causal eight-cycle inputs.
+Exp4 runs only on uninterrupted quantized high-quality 360° PlayOn,
+with uniform-number fading disabled and hearing disabled. Mode changes,
+missing sightings and unsupported configurations reset history.
+
+In F4, ball and player velocity/body corrections are decision-only.
+WorldModel saves stock ball state and player velocity/body/counts, applies
+guarded estimates before caches/interception, and PlayerAgent restores the
+observation state after command construction, logging and debug output.
+WorldModel also restores pending overrides before prediction/mode changes.
+Do not move restoration ahead of logging or remove it: later sensor updates
+must not consume neural values as observations. Step26 routing is separate.
+
+All ball inertia queries and interception use current position/velocity and
+ordinary decay, retaining native opponent-control rules. Learned next state
+is logged only, not installed into BallObject. Default guards retain stock
+ball position/velocity below 5 m raw range and player velocity below 10 m.
+Reported body directions are preserved. Missing-state validity is raised
+only for the decision snapshot; the original counts are restored afterward.
+
+The additive `exp4_*` object columns retain candidates even when a guard
+prevents application. `exp4_pos_applied`, `exp4_vel_applied` and
+`exp4_body_applied` mark individual writes; `exp4_applied` is their OR.
+`exp4_forecast_applied` is always false in F4. Off/out-of-scope rows are
+empty. `trk_*` is the state actually used for that decision.
+`exp4_stock_*_count` records the original sensor ages, including invalid
+states; `exp4_stock_body`/velocity remain empty when invalid.
+`exp4_controlled` and `exp4_owner` record the pre-apply expert/identity cue.
+They are estimated features, not reference labels. For Python reconstruction,
+invalid stock velocity/body ages must be masked to zero as in the feature
+builder, rather than turning an invalid count of 1000 into a feature of one.
+
+Metadata includes `config.exp4_integration=f4-isolated-observations`,
+effective overall/player/ball modes, forecast mode (off/shadow) and all
+three raw-range guards. Independent player/ball modes are supplied by the
+client. Keep schema-2 F3 analysis separate: its applied flag represented the
+global mode and its baseline could contain earlier neural feedback.
+
 ## TL;DR
 
-Per-agent dataset logger for training observation denoisers: every agent writes raw sensors, librcsc estimates, server ground truth, commands and a behavior label each cycle (`DenoiseLogger::SCHEMA_VERSION` = 2, also in `meta.json`).
+Per-agent dataset logger for training observation denoisers: every agent writes raw sensors, librcsc estimates, server ground truth, commands and a behavior label each cycle (`DenoiseLogger::SCHEMA_VERSION` = 3, also in `meta.json`).
 
 - Enable with `--denoise_log_dir DIR` (empty = logger is not even created). Truth needs `--use_fullstate false --debug_fullstate true` (helios: `start.sh --fullstate reference --denoise-log-dir DIR`).
 - Output: `<denoise_log_dir>/<game_id>/<side>_<unum>/` with `agent_cycle`, `objects`, `landmarks`, `hear`, `extra_tracks`, `raw_stream` (`.csv.gz`, or plain `.csv` when built without zlib) and `meta.json`.
@@ -143,3 +199,13 @@ Every received (`recv`) and sent (`send`) message. The `msg` field is escaped re
 - If `use_fullstate` is true (default) the WM itself is built from truth; the logger still works but estimates equal truth. Use reference mode for training data.
 - Verified by reading code only; not compiled or run when written. Missed decisions are represented by placeholder rows (`decision_made=0`) only within one `stopped == 0` stream; gaps across `stopped != 0` rows or beyond the 6000-row cap are not filled.
 - Column names in the `Row` builders are checked at runtime: an unknown name prints one `(DenoiseLogger) unknown column name` warning.
+
+## Server scheduling metadata (Exp4 step 06)
+
+The common ServerParam map mirrors v19 `randomize_player_commands`,
+`command_order_seed`, `command_order_log` and `random_seed`; the logger's
+existing server-parameter snapshot therefore preserves resolved seeds and
+the scheduling condition. Client defaults are false/-1/false/-1 for servers
+that do not send these keys. These mirrors do not change estimation or
+decision logic. Execution order is in the server's command-order CSV; RCL
+still records reception. See the sibling server Exp4 step 06 report.
