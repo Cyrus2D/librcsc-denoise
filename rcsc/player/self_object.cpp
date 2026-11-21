@@ -599,7 +599,11 @@ SelfObject::updateAfterSenseBody( const BodySensor & sense,
         // sensed speed dir is rounded by  "Rad2IDeg(a) ((int)(Rad2Deg(a)))"
         double sensed_speed_dir = sense.speedDir();
         double sensed_speed_dir_error = 0.5;
-        if ( sensed_speed_dir == 0.0 )
+        if ( ServerParam::i().seeNoQuantization() )
+        {
+            sensed_speed_dir_error = 1.0e-6;
+        }
+        else if ( sensed_speed_dir == 0.0 )
         {
             sensed_speed_dir_error = 1.0;
         }
@@ -627,8 +631,8 @@ SelfObject::updateAfterSenseBody( const BodySensor & sense,
                            &minsin,
                            &maxsin );
         // sensed speed is rounded by 0.01
-        M_vel_error.assign( ( maxcos - mincos ) * ( sense.speedMag() + 0.005 ),
-                            ( maxsin - minsin ) * ( sense.speedMag() + 0.005 ) );
+        M_vel_error.assign( ( maxcos - mincos ) * ( sense.speedMag() + (ServerParam::i().seeNoQuantization() ? 1.0e-6 : 0.005) ),
+                            ( maxsin - minsin ) * ( sense.speedMag() + (ServerParam::i().seeNoQuantization() ? 1.0e-6 : 0.005) ) );
 
 #ifdef DEBUG_PRINT
         dlog.addText( Logger::WORLD,
@@ -957,7 +961,11 @@ SelfObject::updateVelDirAfterSee( const BodySensor & sense,
         // sensed speed dir is rounded by  "Rad2IDeg(a) ((int)(Rad2Deg(a)))"
         double sensed_speed_dir = sense.speedDir();
         double sensed_speed_dir_error = 0.5;
-        if ( sensed_speed_dir == 0.0 )
+        if ( ServerParam::i().seeNoQuantization() )
+        {
+            sensed_speed_dir_error = 1.0e-6;
+        }
+        else if ( sensed_speed_dir == 0.0 )
         {
             sensed_speed_dir_error = 1.0;
         }
@@ -989,8 +997,8 @@ SelfObject::updateVelDirAfterSee( const BodySensor & sense,
                            &minsin,
                            &maxsin );
         // sensed speed is rounded by 0.01
-        M_vel_error.assign( ( maxcos - mincos ) * ( sense.speedMag() + 0.005 ),
-                            ( maxsin - minsin ) * ( sense.speedMag() + 0.005 ) );
+        M_vel_error.assign( ( maxcos - mincos ) * ( sense.speedMag() + (ServerParam::i().seeNoQuantization() ? 1.0e-6 : 0.005) ),
+                            ( maxsin - minsin ) * ( sense.speedMag() + (ServerParam::i().seeNoQuantization() ? 1.0e-6 : 0.005) ) );
 
 #ifdef DEBUG_PRINT
         dlog.addText( Logger::WORLD,

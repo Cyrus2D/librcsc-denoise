@@ -88,7 +88,7 @@
 
 namespace rcsc {
 
-const int DenoiseLogger::SCHEMA_VERSION = 2;
+const int DenoiseLogger::SCHEMA_VERSION = 4;
 
 namespace {
 
@@ -177,7 +177,7 @@ const char * const COLS_OBJECTS =
     "trk_pos_count,trk_seen_pos_count,trk_vel_count,trk_seen_vel_count,trk_body_count,trk_face_count,"
     "trk_is_ghost,trk_ghost_count,trk_lost_count,"
     "trk_heard_pos_x,trk_heard_pos_y,trk_heard_pos_count,trk_heard_vel_x,trk_heard_vel_y,trk_heard_vel_count,"
-    "trk_dist_from_self,trk_angle_from_self";
+    "trk_dist_from_self,trk_angle_from_self,trk_stock_pos_x,trk_stock_pos_y,trk_stock_pos_count,trk_prediction_active";
 
 const char * const COLS_LANDMARKS =
     DN_KEYS ","
@@ -688,6 +688,10 @@ public:
       }
 };
 
+const char * const COLS_PLAYER_PREDICTION = DN_KEYS ",object_id,status,active,eligible,selected,applied,named_age,stock_count,decision_count,score,inference_us,stock_x,stock_y,pred_x,pred_y,used_x,used_y,truth_valid,true_x,true_y,true_dist,stock_error,pred_error,used_error";
+const Schema SCHEMA_PLAYER_PREDICTION( COLS_PLAYER_PREDICTION );
+const Schema SCHEMA_PLAYER_PREDICTION_FEATURES( "game_id,side,unum,cycle,stopped,object_id,f0,f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13,f14,f15,f16,f17,f18,f19,f20,f21,f22,f23,f24,f25,f26,f27,f28,f29,f30,f31,f32,f33,f34,f35,f36,f37,f38,f39,f40,f41,f42,f43,f44,f45,f46,f47,f48,f49,f50" );
+
 const Schema SCHEMA_AGENT_CYCLE( COLS_AGENT_CYCLE );
 const Schema SCHEMA_OBJECTS( COLS_OBJECTS );
 const Schema SCHEMA_LANDMARKS( COLS_LANDMARKS );
@@ -859,6 +863,8 @@ struct DenoiseLogger::Impl {
     Table t_hear_;
     Table t_extra_;
     Table t_raw_;
+    Table t_prediction_;
+    Table t_prediction_features_;
 
     ObjectTable object_table_;
 
@@ -908,6 +914,8 @@ struct DenoiseLogger::Impl {
           t_hear_( SCHEMA_HEAR, "hear" ),
           t_extra_( SCHEMA_EXTRA_TRACKS, "extra_tracks" ),
           t_raw_( SCHEMA_RAW_STREAM, "raw_stream" ),
+          t_prediction_( SCHEMA_PLAYER_PREDICTION, "player_prediction" ),
+          t_prediction_features_( SCHEMA_PLAYER_PREDICTION_FEATURES, "player_prediction_features" ),
           cur_( -1, 0 ),
           last_time_( -1, 0 ),
           last_row_time_( -1, 0 )
@@ -958,6 +966,7 @@ struct DenoiseLogger::Impl {
     void matchTracks();
     void buildCyclePrefix();
     void writeObjects();
+    void writePlayerPredictions();
     void writeLandmarks();
     void writeExtraTracks();
     void flushHear( const GameTime & t, const bool all );
@@ -1129,6 +1138,8 @@ DenoiseLogger::Impl::ensureOpen()
     bool ok = true;
     ok = t_cycle_.open( dir_ ) && ok;
     ok = t_obj_.open( dir_ ) && ok;
+    ok = t_prediction_.open( dir_ ) && ok;
+    ok = t_prediction_features_.open( dir_ ) && ok;
     ok = t_hear_.open( dir_ ) && ok;
     ok = t_extra_.open( dir_ ) && ok;
     if ( agent_.config().denoiseLogLandmarks() ) ok = t_land_.open( dir_ ) && ok;
@@ -1163,6 +1174,8 @@ DenoiseLogger::Impl::closeAll()
     bool ok = true;
     ok = t_cycle_.close() && ok;
     ok = t_obj_.close() && ok;
+    ok = t_prediction_.close() && ok;
+    ok = t_prediction_features_.close() && ok;
     ok = t_land_.close() && ok;
     ok = t_hear_.close() && ok;
     ok = t_extra_.close() && ok;
@@ -1193,7 +1206,7 @@ DenoiseLogger::Impl::checkFailure()
 {
     if ( failed_ ) return;
 
-    const Table * tables[] = { &t_cycle_, &t_obj_, &t_land_, &t_hear_, &t_extra_, &t_raw_ };
+    const Table * tables[] = { &t_cycle_, &t_obj_, &t_land_, &t_hear_, &t_extra_, &t_raw_, &t_prediction_, &t_prediction_features_ };
     for ( const Table * t : tables )
     {
         if ( t->bad() )
@@ -1210,6 +1223,8 @@ DenoiseLogger::Impl::flushAll()
 {
     t_cycle_.flush();
     t_obj_.flush();
+    t_prediction_.flush();
+    t_prediction_features_.flush();
     t_land_.flush();
     t_hear_.flush();
     t_extra_.flush();
@@ -1290,14 +1305,25 @@ DenoiseLogger::Impl::writeMeta( const bool final_write )
     os << "    \"denoise_log_landmarks\": " << ( cfg.denoiseLogLandmarks() ? "true" : "false" ) << ",\n";
     os << "    \"denoise_log_raw\": " << ( cfg.denoiseLogRaw() ? "true" : "false" ) << ",\n";
     os << "    \"full_view\": " << ( ServerParam::i().fullView() ? "true" : "false" ) << ",\n";
-    os << "    \"see_noise_free\": " << ( ServerParam::i().seeNoiseFree() ? "true" : "false" ) << "\n";
+    os << "    \"see_noise_free\": " << ( ServerParam::i().seeNoiseFree() ? "true" : "false" ) << ",\n";
+    os << "    \"see_no_quantization\": " << ( ServerParam::i().seeNoQuantization() ? "true" : "false" ) << "\n";
     os << "  },\n";
+
+    os << "  \"run_options\": {";
+    bool first_option = true;
+    for ( const auto & option : agent_.runMetadata() )
+    {
+        if ( ! first_option ) os << ',';
+        first_option = false;
+        os << "\n    \"" << json_escape(option.first) << "\": \"" << json_escape(option.second) << '\"';
+    }
+    os << "\n  },\n";
 
     os << "  \"player_type_id\": " << self_type.id() << ",\n";
 
     os << "  \"tables\": {\n";
-    const Table * tables[] = { &t_cycle_, &t_obj_, &t_land_, &t_hear_, &t_extra_, &t_raw_ };
-    for ( std::size_t i = 0; i < 6; ++i )
+    const Table * tables[] = { &t_cycle_, &t_obj_, &t_land_, &t_hear_, &t_extra_, &t_raw_, &t_prediction_, &t_prediction_features_ };
+    for ( std::size_t i = 0; i < 8; ++i )
     {
         os << "    \"" << tables[i]->name() << "\": [";
         const std::vector< std::string > & cols = tables[i]->schema().cols_;
@@ -1305,7 +1331,7 @@ DenoiseLogger::Impl::writeMeta( const bool final_write )
         {
             os << ( k == 0 ? "" : "," ) << '"' << cols[k] << '"';
         }
-        os << "]" << ( i + 1 < 6 ? ",\n" : "\n" );
+        os << "]" << ( i + 1 < 8 ? ",\n" : "\n" );
     }
     os << "  },\n";
 
@@ -1678,7 +1704,7 @@ DenoiseLogger::Impl::matchTracks()
             if ( trk_[id].obj_ )
             {
                 // duplicated unum. keep the track which has the smaller position count
-                if ( c.o_->posCount() < trk_[id].obj_->posCount() )
+                if ( c.o_->trackedPosCount() < trk_[id].obj_->trackedPosCount() )
                 {
                     add_extra( trk_[id].obj_, trk_[id].list_, "dup_unum" );
                     trk_[id].obj_ = c.o_;
@@ -1967,6 +1993,51 @@ DenoiseLogger::Impl::buildCyclePrefix()
             {
                 r.nang( "n_sb_speed_dir", sb.speedDir(), o.vel_.th().degree() - tru_face );
             }
+        }
+    }
+}
+
+void
+DenoiseLogger::Impl::writePlayerPredictions()
+{
+    const auto & frame = agent_.world().playerPredictionFrame();
+    if ( frame.cycle != cur_.cycle() || frame.stopped != cur_.stopped() ) return;
+    if ( frame.players.empty() )
+    {
+        Row row( SCHEMA_PLAYER_PREDICTION );keys( row, cur_ );
+        row.i( "object_id", -1 ).s( "status", frame.status ).b( "active", frame.active );
+        t_prediction_.write( row );return;
+    }
+    for ( const auto & rec : frame.players )
+    {
+        const int oid = object_id( rec.side, rec.unum );
+        if ( oid < 1 || oid > 22 ) continue;
+        Row row( SCHEMA_PLAYER_PREDICTION );keys( row, cur_ );
+        const Vector2D stock = g( rec.stock ), pred = g( rec.predicted );
+        const Vector2D used = rec.applied ? pred : stock;
+        row.i( "object_id", oid ).s( "status", frame.status ).b( "active", frame.active )
+            .b( "eligible", rec.eligible ).b( "selected", rec.selected ).b( "applied", rec.applied )
+            .i( "named_age", rec.named_age ).i( "stock_count", rec.stock_count ).i( "decision_count", rec.decision_count )
+            .d( "score", rec.score, 10 ).d( "inference_us", frame.inference_us, 2 );
+        if ( stock.isValid() ) row.xy( "stock_x", "stock_y", stock );
+        if ( pred.isValid() ) row.xy( "pred_x", "pred_y", pred );
+        if ( used.isValid() ) row.xy( "used_x", "used_y", used );
+        const auto & truth = truth_[oid];
+        row.b( "truth_valid", truth_valid_ && truth.has_ );
+        if ( truth_valid_ && truth.has_ )
+        {
+            row.xy( "true_x", "true_y", truth.pos_, PREC_TRUE );
+            if ( truth_[self_id_].has_ ) row.d( "true_dist", truth.pos_.dist( truth_[self_id_].pos_ ), PREC_TRUE );
+            if ( stock.isValid() ) row.d( "stock_error", stock.dist( truth.pos_ ), 8 );
+            if ( pred.isValid() ) row.d( "pred_error", pred.dist( truth.pos_ ), 8 );
+            if ( used.isValid() ) row.d( "used_error", used.dist( truth.pos_ ), 8 );
+        }
+        t_prediction_.write( row );
+        if ( rec.features.size() == 51 )
+        {
+            Row f( SCHEMA_PLAYER_PREDICTION_FEATURES );keys( f, cur_ );f.i( "object_id", oid );
+            for ( std::size_t k = 0; k < rec.features.size(); ++k ) { const std::string key="f"+std::to_string(k); f.d( key.c_str(), rec.features[k], 10 ); }
+            t_prediction_features_.write( f );
         }
     }
 }
@@ -2289,6 +2360,9 @@ DenoiseLogger::Impl::writeObjects()
                 if ( p->posValid() )
                 {
                     r.xy( "trk_pos_x", "trk_pos_y", g( p->pos() ) )
+                        .xy( "trk_stock_pos_x", "trk_stock_pos_y", g( p->trackedPos() ) )
+                        .i( "trk_stock_pos_count", p->trackedPosCount() )
+                        .b( "trk_prediction_active", p->hasPositionPrediction() )
                         .i( "trk_pos_count", p->posCount() )
                         .i( "trk_seen_pos_count", p->seenPosCount() );
                 }
@@ -2826,6 +2900,7 @@ DenoiseLogger::Impl::beginCycle( const GameTime & t,
     buildCyclePrefix();
 
     writeObjects();
+    writePlayerPredictions();
     writeLandmarks();
     writeExtraTracks();
     flushHear( t, false );

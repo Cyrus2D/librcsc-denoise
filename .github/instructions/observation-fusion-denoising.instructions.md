@@ -70,3 +70,40 @@ Fusion is mostly replace-and-age: a forward model predicts each object, a fresh 
 - [communication-audio-denoising](communication-audio-denoising.instructions.md)
 - [player-world-model](player-world-model.instructions.md)
 - [../copilot-instructions.md](../copilot-instructions.md)
+
+## Exp5 decision-only player position prediction
+
+The denoise branch now supports an opt-in observation-only callback through
+`PlayerAgent::setPlayerPredictionFunction` / `WorldModel`. Model files, causal
+history and inference are owned by the client, not librcsc. The callback runs
+after raw fusion/collision processing, before lines, kickability and intercept
+caches. It must not read fullstate. Current Helios use is Exp5 PlayOn only.
+
+`AbstractPlayerObject::pos()` exposes an accepted prediction for this decision;
+`trackedPos()` / `trackedPosCount()` always expose unmodified tracker state.
+`posCount()` uses PlayerPredictionCountPolicy: Preserve keeps tracker age (default), Zero
+returns zero, Half returns max(1, trackedPosCount()/2) with integer division,
+only while the overlay is active. The bool API overload remains compatible. `seenPos`, `seenPosCount`, velocity and body are
+never rewritten. Zero is a decision-policy experiment, not a visual sighting.
+Fresh count-zero positions are never replaced. `decisionPos(fallback)` prevents
+seen/heard fallback paths from bypassing an accepted correction when age is kept.
+
+Rebuild player distance/sorting caches after application and clearing. Clear
+overlays after action/debug output and defensively before new fusion. Do not
+feed predicted state into sensor matching, ghost logic or next model inputs.
+Decision-derived lines/history/intercept results may use the current prediction.
+The current model changes current position only; it does not learn velocity or
+body, and is not the archived Exp3/4 quantization denoiser.
+
+## Cache rebuild invariants (cache-v2)
+
+Rebuilding after applying/removing an overlay must be idempotent. Clear all
+derived player vectors and lookup arrays, and reset current kickable pointers.
+Overlay refreshes pass infer_identity=false; the ordinary raw refresh alone
+may estimate unknown unum/goalies. Previous code appended duplicate players and
+could alter inferred identities on a second pass. Old live scores are affected;
+see experiments/exp5/reports/final in the sibling server repo. New Helios metadata
+records player_gap_integration=cache-v2. Offline prediction-error gains remain
+evidence; new corrected-cache preserve/zero batches each have 200 games, with no established
+gameplay gain. The server Exp5 latest comparison records these separately
+from the old pre-fix trials.

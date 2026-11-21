@@ -143,3 +143,46 @@ Every received (`recv`) and sent (`send`) message. The `msg` field is escaped re
 - If `use_fullstate` is true (default) the WM itself is built from truth; the logger still works but estimates equal truth. Use reference mode for training data.
 - Verified by reading code only; not compiled or run when written. Missed decisions are represented by placeholder rows (`decision_made=0`) only within one `stopped == 0` stream; gaps across `stopped != 0` rows or beyond the 6000-row cap are not filled.
 - Column names in the `Row` builders are checked at runtime: an unknown name prints one `(DenoiseLogger) unknown column name` warning.
+
+## Exp5 baseline metadata and policy hook
+
+The schema remains 2 with additive metadata: config.see_no_quantization
+records the sensor mode, and PlayerAgent::runMetadata supplies escaped
+run_options (currently view_policy). The server-parameter mirror includes
+randomize_player_commands, command_order_log, command_order_seed and
+random_seed so scheduling/seed settings survive the snapshot.
+Existing per-cycle/object fields already capture finite-view gaps and
+truth; archived Exp3/Exp4 models/schema-3 fields are not needed.
+
+PlayerAgent::handleActionReady is an empty-by-default virtual called after
+auxiliary actions/communication and before updateJustAfterDecision,
+predictions and command composition. Helios uses it only to enforce an
+explicit fixed view policy after neck actions may request a view change.
+The adaptive path leaves decisions unchanged.
+
+## Exp5 live schema 4 (supersedes the baseline schema-2 statement)
+
+The logger now writes schema 4. Existing baseline columns remain available;
+the archived Exp3/4 schema 3 is a separate implementation on denoise-exp3-exp4.
+Two additional tables are created with headers even when the model is off:
+
+- `player_prediction`: per-target original/proposed/used position, score,
+  eligibility/selection/application, original/effective age, named-sighting age,
+  status and inference time. Same-cycle fullstate supplies truth/error fields
+  only inside the logger. An inactive frame uses object_id=-1.
+- `player_prediction_features`: optional f0..f50 input diagnostics, enabled by
+  Helios `--player-gap-features`; normally header-only. Feature definitions are
+  in Exp5-S1 `code/prepare.py`. No truth is in these features.
+
+`objects.trk_pos_x/y`, `trk_pos_count` and existing position-noise columns refer
+to the used decision state. New **player-row** columns `trk_stock_pos_x/y`,
+`trk_stock_pos_count` preserve the unmodified baseline tracker; the ball leaves
+these columns empty. `trk_prediction_active` identifies an applied overlay.
+Readers rebuilding model inputs must use stock columns for player rows and
+retain the normal trk fields for the ball. Exp5-S1 prepare.py version 2 does so
+and still supports old schema-2 logs. All positions keep the global server frame.
+Prediction error fields use metres; inference_us is repeated per target and
+must be deduplicated by observer/cycle before timing summaries. run_options
+records mode, position-count policy, and model bundle ID. Finalization checks
+include both new tables. Feature rows use 10 decimals, positions the existing
+4 decimals, and truth 6 decimals.

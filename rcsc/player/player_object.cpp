@@ -443,10 +443,10 @@ void
 PlayerObject::updateSelfBallRelated( const Vector2D & self,
                                      const Vector2D & ball )
 {
-    M_dist_from_ball = ( M_pos - ball ).r();
-    M_angle_from_ball = ( M_pos - ball ).th();
-    M_dist_from_self = ( M_pos - self ).r();
-    M_angle_from_self = ( M_pos - self ).th();
+    M_dist_from_ball = ( pos() - ball ).r();
+    M_angle_from_ball = ( pos() - ball ).th();
+    M_dist_from_self = ( pos() - self ).r();
+    M_angle_from_self = ( pos() - self ).th();
 }
 
 

@@ -177,10 +177,10 @@ public:
           // return ( client_version >= 18.0
           //          ? getLandmarkDistanceRangeV18( view_width, quant_dist, mean_dist, dist_error )
           //          : getStaticObjInfo( quant_dist, mean_dist, dist_error ) );
-          if ( ServerParam::i().seeNoiseFree() )
+          if ( ServerParam::i().seeNoiseFree() || ServerParam::i().seeNoQuantization() )
           {
               *mean_dist = quant_dist;
-              *dist_error = 0.01;
+              *dist_error = ServerParam::i().seeNoQuantization() ? 1.0e-6 : 0.01;
               return true;
           }
 
@@ -208,10 +208,10 @@ public:
           // return ( client_version >= 18.0
           //          ? getDistanceRangeV18( view_width, quant_dist, mean_dist, dist_error )
           //          : getMovableObjInfo( quant_dist, mean_dist, dist_error ) );
-          if ( ServerParam::i().seeNoiseFree() )
+          if ( ServerParam::i().seeNoiseFree() || ServerParam::i().seeNoQuantization() )
           {
               *mean_dist = quant_dist;
-              *dist_error = 0.01;
+              *dist_error = ServerParam::i().seeNoQuantization() ? 1.0e-6 : 0.01;
               return true;
           }
 

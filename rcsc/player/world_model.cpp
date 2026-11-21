@@ -740,6 +740,8 @@ void
 WorldModel::update( const ActionEffector & act,
                     const GameTime & current )
 {
+    clearPlayerPredictions();
+
     // this function called from updateAfterSense()
     // or, if player could not receive sense_body,
     // this function will be tried to be called at the top of each update method.
@@ -1119,6 +1121,8 @@ WorldModel::updateAfterSee( const VisualSensor & see,
                             const ActionEffector & act,
                             const GameTime & current )
 {
+    clearPlayerPredictions();
+
     //////////////////////////////////////////////////////////////////
     // check internal update time
     if ( time() != current )
@@ -1991,6 +1995,8 @@ void
 WorldModel::updateJustBeforeDecision( const ActionEffector & act,
                                       const GameTime & current )
 {
+    clearPlayerPredictions();
+
     if ( time() != current )
     {
         update( act, current );
@@ -2016,6 +2022,8 @@ WorldModel::updateJustBeforeDecision( const ActionEffector & act,
     updatePlayerType(); // have to be called after see message.
 
     updatePlayersCollision(); // have to be called after player type update.
+
+    updatePlayerPredictions(); // raw features first, then rebuild corrected geometry
 
 #if 0
     // 2008-04-18: akiyama
@@ -2787,7 +2795,7 @@ WorldModel::addSeePlayerRecord( const int list,
                                 const int index,
                                 const Localization::PlayerT & player )
 {
-    // write-only record for the dataset logger. never read by the world model logic.
+    // Observation-only localization record for logging and optional client estimators.
     SeePlayerRecord r;
     r.list_ = list;
     r.index_ = index;
@@ -3934,8 +3942,23 @@ WorldModel::estimateUnknownPlayerUnum()
 
  */
 void
-WorldModel::updatePlayerStateCache()
+WorldModel::updatePlayerStateCache( const bool infer_identity )
 {
+    // This is also called after applying/clearing a decision overlay. Rebuild,
+    // do not append: duplicate pointers change counts, reach and neck decisions.
+    M_teammates_from_self.clear();
+    M_opponents_from_self.clear();
+    M_teammates_from_ball.clear();
+    M_opponents_from_ball.clear();
+    M_all_players.clear();
+    M_our_players.clear();
+    M_their_players.clear();
+    std::fill( std::begin( M_our_players_array ), std::end( M_our_players_array ), nullptr );
+    std::fill( std::begin( M_their_players_array ), std::end( M_their_players_array ), nullptr );
+    M_kickable_teammate = nullptr;
+    M_kickable_opponent = nullptr;
+    M_maybe_kickable_teammate = nullptr;
+    M_maybe_kickable_opponent = nullptr;
     if ( ! self().posValid()
          || ! ball().posValid() )
     {
@@ -3986,8 +4009,11 @@ WorldModel::updatePlayerStateCache()
                      return lhs->distFromBall() < rhs->distFromBall();
                  } );
 
-    estimateUnknownPlayerUnum();
-    estimateGoalie();
+    if ( infer_identity )
+    {
+        estimateUnknownPlayerUnum();
+        estimateGoalie();
+    }
 
     //
     // create known players array
@@ -5963,3 +5989,59 @@ WorldModel::getPlayerNearestTo( const Vector2D & point,
 }
 
 }
+
+namespace rcsc {
+void WorldModel::setPlayerPredictionFunction( PlayerPredictionFunction fn, bool apply, bool zero_count )
+{
+    setPlayerPredictionFunction( std::move( fn ), apply,
+                                 zero_count ? PlayerPredictionCountPolicy::Zero
+                                 : PlayerPredictionCountPolicy::Preserve );
+}
+
+void WorldModel::setPlayerPredictionFunction( PlayerPredictionFunction fn, bool apply, PlayerPredictionCountPolicy policy )
+{
+    clearPlayerPredictions();
+    M_player_prediction_function = std::move( fn );
+    M_apply_player_prediction = apply;
+    M_prediction_count_policy = policy;
+}
+
+void WorldModel::updatePlayerPredictions()
+{
+    if ( ! M_player_prediction_function ) return;
+    M_player_prediction_frame = M_player_prediction_function( *this );
+    if ( ! M_apply_player_prediction || ! M_player_prediction_frame.active ) return;
+    for ( auto & rec : M_player_prediction_frame.players )
+    {
+        if ( ! rec.eligible || ! rec.selected || ! rec.predicted.isValid() ) continue;
+        auto apply = [&]( PlayerObject::List & players ) {
+            for ( auto & p : players )
+            {
+                if ( p.side() == rec.side && p.unum() == rec.unum
+                     && !rec.applied && p.posValid() && p.trackedPosCount() > 0
+                     && p.trackedPosCount() == rec.stock_count && p.trackedPos() == rec.stock )
+                {
+                    p.setPositionPrediction( rec.predicted, M_prediction_count_policy );
+                    rec.applied = true;
+                    rec.decision_count = p.posCount();
+                    M_player_prediction_applied = true;
+                    break;
+                }
+            }
+        };
+        apply( M_teammates );
+        apply( M_opponents );
+    }
+    if ( M_player_prediction_applied ) updatePlayerStateCache( false );
+}
+
+void WorldModel::clearPlayerPredictions()
+{
+    if ( ! M_player_prediction_applied ) return;
+    for ( auto & p : M_teammates ) p.clearPositionPrediction();
+    for ( auto & p : M_opponents ) p.clearPositionPrediction();
+    M_player_prediction_applied = false;
+    // Restore raw geometry without running identity inference a second time.
+    updatePlayerStateCache( false );
+}
+} // namespace rcsc

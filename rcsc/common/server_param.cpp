@@ -686,6 +686,9 @@ ServerParam::setDefaultParam()
     M_see_no_fade_unum = false;
     M_see_no_fade_all = false;
     M_see_noise_free = false;
+    M_see_no_quantization = false;
+    M_randomize_player_commands = M_command_order_log = false;
+    M_command_order_seed = M_simulator_random_seed = -1;
 
     // XXX
     M_random_seed = -1;
@@ -1006,6 +1009,11 @@ ServerParam::createMap()
         ( "see_no_fade_unum", "", &M_see_no_fade_unum )
         ( "see_no_fade_all", "", &M_see_no_fade_all )
         ( "see_noise_free", "", &M_see_noise_free )
+        ( "see_no_quantization", "", &M_see_no_quantization )
+        ( "randomize_player_commands", "", &M_randomize_player_commands )
+        ( "command_order_log", "", &M_command_order_log )
+        ( "command_order_seed", "", &M_command_order_seed )
+        ( "random_seed", "", &M_simulator_random_seed )
         // XXX
         //( "random_seed", "", &M_random_seed )
         ;

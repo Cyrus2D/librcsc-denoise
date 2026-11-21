@@ -2508,6 +2508,7 @@ PlayerAgent::action()
     M_impl->doNeckAction();
     M_impl->doFocusAction();
     communicationImpl();
+    handleActionReady();
 
     // ------------------------------------------------------------------------
     // set command effect. these must be called before command composing.
@@ -2568,6 +2569,7 @@ PlayerAgent::action()
     // debugger output
     //
     M_impl->printDebug();
+    M_worldmodel.clearPlayerPredictions();
 
     // delete all command objects and say messages
     M_effector.clearAllCommands();

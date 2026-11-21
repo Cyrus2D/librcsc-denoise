@@ -915,6 +915,7 @@ LocalizationDefault::Impl::getDirRange( const double & seen_dir,
 
 #endif
 
+    if ( ServerParam::i().seeNoQuantization() ) *err = 1.0e-6;
     *average += self_face;
     *err += self_face_err;
 }
@@ -1242,7 +1243,7 @@ LocalizationDefault::estimateSelfFace( const WorldModel & wm,
 #ifdef OLD_DIR_ROUND
     *self_face_err = ( *self_face == 0.0 ) ? 1.0 : 0.5;
 #else
-    *self_face_err = 0.5;
+    *self_face_err = ServerParam::i().seeNoQuantization() ? 1.0e-6 : 0.5;
 #endif
 
     return true;
@@ -1285,6 +1286,16 @@ LocalizationDefault::localizeSelf( const WorldModel & wm,
 #endif
 
     ////////////////////////////////////////////////////////////////////
+    if ( ServerParam::i().seeNoQuantization() )
+    {
+        const auto & marker = see.markers().front();
+        const auto it = M_impl->objectTable().landmarkMap().find(marker.id_);
+        if ( it == M_impl->objectTable().landmarkMap().end() ) return false;
+        *self_pos = it->second - Vector2D::polar2vector(marker.dist_, AngleDeg(marker.dir_ + self_face));
+        self_pos_err->assign(1.0e-5, 1.0e-5);
+        return self_pos->isValid();
+    }
+
     // generate points using the nearest marker
     M_impl->generatePoints( wm,
                             see.markers().front(),
@@ -1461,7 +1472,13 @@ LocalizationDefault::localizeBallRelative( const WorldModel & wm,
 
     ////////////////////////////////////////////////////////////////////
     // get velocity
-    if ( ball.has_vel_ )
+    if ( ball.has_vel_ && ServerParam::i().seeNoQuantization() )
+    {
+        rvel->assign(ball.dist_chng_, AngleDeg::DEG2RAD * ball.dir_chng_ * average_dist);
+        rvel->rotate(average_dir);
+        rvel_err->assign(1.0e-5, 1.0e-5);
+    }
+    else if ( ball.has_vel_ )
     {
         double max_dist_dist_chg1
             = ( ball.dist_chng_ / ball.dist_ + 0.02*0.5 ) * max_dist;

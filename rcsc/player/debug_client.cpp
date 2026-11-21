@@ -380,7 +380,7 @@ public:
                << ROUND( circle.circle_.center().x, 0.001 ) << ' '
                << ROUND( circle.circle_.center().y, 0.001 ) << ' '
                << ROUND( circle.circle_.radius(), 0.001 );
-          if ( circle.color_.empty() )
+          if ( ! circle.color_.empty() )
           {
               M_os << " \"" << circle.color_ << '"';
           }
@@ -393,6 +393,8 @@ public:
 /*-------------------------------------------------------------------*/
 
 struct DebugClient::Impl {
+    std::size_t max_packet_size_ = 0; // Optional viewer limit, no public ABI layout change.
+
 
     std::string M_self_comment;
     std::map< const PlayerObject *, std::string > M_comment_map;
@@ -510,7 +512,27 @@ DebugClient::writeAll( const WorldModel & world,
 {
     if ( M_on )
     {
+        if ( M_impl->max_packet_size_ )
+        {
+            if ( M_impl->M_self_comment.size() > 180 ) M_impl->M_self_comment.resize( 180 );
+            for ( auto & c : M_impl->M_comment_map )
+                if ( c.second.size() > 180 ) c.second.resize( 180 );
+            if ( M_message.size() > 1000 ) M_message = M_message.substr( 0, 980 ) + "|TEXT CLIPPED|";
+        }
         this->buildString( world, effector );
+        // Never truncate an S-expression. Retain a valid packet below the viewer limit.
+        while ( M_impl->max_packet_size_ && M_main_buffer.size() + 1 > M_impl->max_packet_size_ )
+        {
+            if ( ! M_impl->M_comment_map.empty() ) M_impl->M_comment_map.clear();
+            else if ( M_message.size() > 160 ) M_message.resize( 160 );
+            else if ( ! M_impl->M_circles.empty() ) M_impl->M_circles.pop_back();
+            else if ( ! M_impl->M_lines.empty() ) M_impl->M_lines.pop_back();
+            else if ( ! M_impl->M_triangles.empty() ) M_impl->M_triangles.pop_back();
+            else if ( ! M_impl->M_rectangles.empty() ) M_impl->M_rectangles.pop_back();
+            else { this->clear(); return; }
+            if ( M_message.find( "OVERLAY CLIPPED|" ) != 0 ) M_message.insert( 0, "OVERLAY CLIPPED|" );
+            this->buildString( world, effector );
+        }
 
         if ( M_connected )
         {
@@ -565,7 +587,7 @@ DebugClient::buildString( const WorldModel & world,
 
     ostr << "((debug (format-version 5)) (time "
          << world.time().cycle() << ',';
-    if ( world.gameMode().type() == GameMode::BeforeKickOff )
+    if ( world.gameMode().type() == GameMode::BeforeKickOff && ! M_impl->max_packet_size_ )
     {
         ostr << "0)";
     }
@@ -771,6 +793,23 @@ DebugClient::write( const long & cycle )
 /*!
 
  */
+void
+DebugClient::setMaxPacketSize( std::size_t bytes )
+{
+    M_impl->max_packet_size_ = bytes;
+}
+
+void
+DebugClient::clearDrawings()
+{
+    M_target_point.invalidate();
+    M_target_unum = Unum_Unknown;
+    M_impl->M_lines.clear();
+    M_impl->M_triangles.clear();
+    M_impl->M_rectangles.clear();
+    M_impl->M_circles.clear();
+}
+
 void
 DebugClient::clear()
 {

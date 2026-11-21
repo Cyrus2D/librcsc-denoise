@@ -651,6 +651,11 @@ private:
     bool M_see_no_fade_unum;
     bool M_see_no_fade_all;
     bool M_see_noise_free;
+    bool M_see_no_quantization;
+    bool M_randomize_player_commands;
+    bool M_command_order_log;
+    int M_command_order_seed;
+    int M_simulator_random_seed;
 
     // xxx
     int M_random_seed;
@@ -1145,6 +1150,9 @@ public:
     bool seeNoFadeUnum() const { return M_see_no_fade_unum; }
     bool seeNoFadeAll() const { return M_see_no_fade_all; }
     bool seeNoiseFree() const { return M_see_noise_free; }
+    bool seeNoQuantization() const { return M_see_no_quantization; }
+    bool randomizePlayerCommands() const { return M_randomize_player_commands; }
+    int commandOrderSeed() const { return M_command_order_seed; }
 
     // XXX
     int randomSeed() const { return M_random_seed; }

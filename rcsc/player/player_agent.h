@@ -42,6 +42,7 @@
 #include <rcsc/types.h>
 
 #include <memory>
+#include <map>
 #include <vector>
 
 namespace rcsc {
@@ -72,8 +73,12 @@ private:
 
     //! internal implementation object
     std::unique_ptr< Impl > M_impl;
+    std::map<std::string, std::string> M_run_metadata;
 
 protected:
+    void setRunMetadata( const std::string & key, const std::string & value )
+      { M_run_metadata[key] = value; }
+
 
     //! configuration parameter set
     PlayerConfig M_config;
@@ -210,6 +215,7 @@ public:
       \param label label string
     */
     void addActionLabel( const std::string & label );
+    const std::map<std::string, std::string> & runMetadata() const { return M_run_metadata; }
 
     /*!
       \brief register kick command
@@ -486,6 +492,12 @@ protected:
     virtual
     void actionImpl() = 0;
 
+    void setPlayerPredictionFunction( PlayerPredictionFunction fn, bool apply, PlayerPredictionCountPolicy policy )
+    { M_worldmodel.setPlayerPredictionFunction( std::move( fn ), apply, policy ); }
+    void setPlayerPredictionFunction( PlayerPredictionFunction fn, bool apply, bool zero_count )
+    { M_worldmodel.setPlayerPredictionFunction( std::move( fn ), apply, zero_count ); }
+
+
     /*!
       \brief virtual method. register say action to ActionEffector
 
@@ -494,6 +506,11 @@ protected:
     */
     virtual
     void communicationImpl()
+      { }
+
+    //! Final client policy hook after auxiliary actions, before command predictions/composition.
+    virtual
+    void handleActionReady()
       { }
 
 

@@ -163,6 +163,13 @@ public:
       \brief clear all data
     */
     void clear();
+    //! Drop planner geometry for a dedicated inspector, keeping object comments.
+    void clearDrawings();
+    //! Replace the banner for an inspector.
+    void setMessage( const std::string & message ) { if ( M_on ) M_message = message; }
+    //! Optional whole-packet limit including NUL; zero retains the default.
+    void setMaxPacketSize( std::size_t bytes );
+
 
     /*!
       \brief add formatted string to buffer

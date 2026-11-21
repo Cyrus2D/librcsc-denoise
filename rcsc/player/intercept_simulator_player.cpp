@@ -56,7 +56,7 @@ inline
 Vector2D
 get_pos( const PlayerObject & p )
 {
-    return ( p.heardPosCount() <= p.seenPosCount() - 2
+    return p.decisionPos( p.heardPosCount() <= p.seenPosCount() - 2
              ? p.heardPos()
              : p.seenPos() );
 }

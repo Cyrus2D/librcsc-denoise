@@ -38,6 +38,7 @@
 #include <rcsc/player/view_area.h>
 #include <rcsc/player/view_grid_map.h>
 #include <rcsc/player/intercept_table.h>
+#include <rcsc/player/player_prediction.h>
 #include <rcsc/player/penalty_kick_state.h>
 #include <rcsc/player/world_state.h>
 
@@ -107,7 +108,7 @@ public:
     };
 
     /*!
-      \brief localization result of one raw visual player entry. write-only record for the dataset logger.
+      \brief localization result of one raw visual player entry, for logging and client estimators.
       list_: 0 = see opponents, 1 = unknown opponents, 2 = teammates, 3 = unknown teammates,
       4 = unknown players. index_ is the index in that list of VisualSensor.
      */
@@ -124,6 +125,14 @@ public:
     };
 
 private:
+
+    PlayerPredictionFunction M_player_prediction_function;
+    PlayerPredictionFrame M_player_prediction_frame;
+    bool M_apply_player_prediction = false;
+    PlayerPredictionCountPolicy M_prediction_count_policy = PlayerPredictionCountPolicy::Preserve;
+    bool M_player_prediction_applied = false;
+
+    void updatePlayerPredictions();
 
     double M_client_version;
 
@@ -501,6 +510,12 @@ public:
       This method is called just before action decision to update and
       adjust world model.
     */
+    //! Client-owned model callback, invoked on the raw tracker before decision caches.
+    void setPlayerPredictionFunction( PlayerPredictionFunction fn, bool apply, PlayerPredictionCountPolicy policy );
+    void setPlayerPredictionFunction( PlayerPredictionFunction fn, bool apply, bool zero_count );
+    const PlayerPredictionFrame & playerPredictionFrame() const { return M_player_prediction_frame; }
+    void clearPlayerPredictions();
+
     void updateJustBeforeDecision( const ActionEffector & act,
                                    const GameTime & current );
 
@@ -664,9 +679,10 @@ private:
     void estimateUnknownPlayerUnum();
 
     /*!
-      \brief update player info. relation with ball and self.
+      \brief rebuild derived player containers and ball/self geometry.
+      \param infer_identity false for decision-overlay refreshes.
      */
-    void updatePlayerStateCache();
+    void updatePlayerStateCache( bool infer_identity = true );
 
     /*!
       \brief update our/their goalie

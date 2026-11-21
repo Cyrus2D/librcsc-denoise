@@ -114,3 +114,30 @@ Server protocol: a player connects with `(init ...)`, receives `(server_param ..
 - [coach-trainer-clang](coach-trainer-clang.instructions.md)
 - [build-install-tools](build-install-tools.instructions.md)
 - [../copilot-instructions.md](../copilot-instructions.md)
+
+## Exp5 prediction API and age policy
+
+See [observation-fusion-denoising](observation-fusion-denoising.instructions.md#exp5-decision-only-player-position-prediction).
+`player_prediction.h` is an installed public header in both build systems.
+An empty callback leaves baseline behavior unchanged. Accepted forecasts overlay
+`pos()` before decision caches, with raw `trackedPos()`/`trackedPosCount()` kept
+separate. Only effective decision `posCount()` changes: preserve, zero, or half
+(max(1, floor(raw count/2)));
+visual ages and raw tracking remain unchanged. `PlayerAgent::action` clears
+after logger/debug output so the next fusion uses the original state.
+
+## Exp5 cache-v2 correction and debug packets
+
+The old overlay integration reused updatePlayerStateCache without clearing its
+derived containers. That appended duplicate references and reran identity
+inference after correction. updatePlayerStateCache now clears the seven pointer
+containers, both lookup arrays and current kickable pointers before rebuilding.
+Its infer_identity flag defaults true for the normal raw update; apply/clear
+overlays call it with false. Never infer identity from corrected geometry.
+Old preserve/zero200-game results must retain the final-report caveat.
+
+DebugClient now supports clearDrawings, setMessage and an optional whole-packet
+limit through the pimpl (default0, no public object-layout change). The inspector
+uses7800 bytes for the viewer's8192-byte receive buffer; oversized packets shed
+comments/geometry and stay valid expressions. Circle color serialization's
+inverted empty check was fixed. These methods affect display, not model input.

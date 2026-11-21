@@ -33,6 +33,7 @@
 #define RCSC_PLAYER_ABSTRACT_PLAYER_OBJECT_H
 
 #include <rcsc/player/localization.h>
+#include <rcsc/player/player_prediction.h>
 #include <rcsc/common/player_type.h>
 #include <rcsc/geom/vector_2d.h>
 #include <rcsc/geom/angle_deg.h>
@@ -67,6 +68,10 @@ protected:
 
     const PlayerType * M_player_type; //!< player type reference
     Card M_card; //!< card information
+
+    Vector2D M_prediction_pos{ Vector2D::INVALIDATED };
+    bool M_prediction_active = false;
+    PlayerPredictionCountPolicy M_prediction_count_policy = PlayerPredictionCountPolicy::Preserve;
 
     Vector2D M_pos; //!< global coordinate
     int M_pos_count; //!< main accuracy counter
@@ -285,8 +290,21 @@ public:
     */
     const Vector2D & pos() const
     {
-        return M_pos;
+        return M_prediction_active ? M_prediction_pos : M_pos;
     }
+
+    //! Unmodified tracker state, independent of decision overlays/count policy.
+    const Vector2D & trackedPos() const { return M_pos; }
+    int trackedPosCount() const { return M_pos_count; }
+    bool hasPositionPrediction() const { return M_prediction_active; }
+    const Vector2D & decisionPos( const Vector2D & fallback ) const
+    { return M_prediction_active ? M_prediction_pos : fallback; }
+    void setPositionPrediction( const Vector2D & pos, const PlayerPredictionCountPolicy policy )
+    { M_prediction_pos = pos; M_prediction_count_policy = policy; M_prediction_active = true; }
+    //! Compatibility with the original preserve/zero interface.
+    void setPositionPrediction( const Vector2D & pos, const bool zero_count )
+    { setPositionPrediction( pos, zero_count ? PlayerPredictionCountPolicy::Zero : PlayerPredictionCountPolicy::Preserve ); }
+    void clearPositionPrediction() { M_prediction_active = false; }
 
     /*!
       \brief get global position accuracy
@@ -294,6 +312,12 @@ public:
     */
     int posCount() const
     {
+        if ( ! M_prediction_active ) return M_pos_count;
+        if ( M_prediction_count_policy == PlayerPredictionCountPolicy::Zero ) return 0;
+        if ( M_prediction_count_policy == PlayerPredictionCountPolicy::Half )
+        {
+            return M_pos_count < 2 ? 1 : M_pos_count / 2;
+        }
         return M_pos_count;
     }
 

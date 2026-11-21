@@ -81,3 +81,15 @@ The parser keeps raw rounded values; `LocalizationDefault` converts them to posi
 - [communication-audio-denoising](communication-audio-denoising.instructions.md)
 - [player-world-model](player-world-model.instructions.md)
 - [../copilot-instructions.md](../copilot-instructions.md)
+
+## Exp5 exact-mode localization
+
+ServerParam::seeNoQuantization mirrors the new optional v19 flag.
+ObjectTable returns the actual range with numerical tolerance instead of a
+quantization interval. Direction intervals and face uncertainty likewise
+use numerical tolerance. localizeSelf computes the visual pose directly
+from an observed known landmark and observed face; it never reads fullstate.
+Ball motion uses the exact radial/angular derivative. SelfObject skips the
+legacy half-degree speed-direction dequantization in this mode.
+Between sightings, ordinary prediction remains; exact measurements do not
+imply exact unseen state. Legacy/distance-only modes retain their old paths.

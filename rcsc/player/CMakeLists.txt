@@ -57,6 +57,7 @@ install(FILES
   object_table.h
   penalty_kick_state.h
   player_command.h
+  player_prediction.h
   player_agent.h
   player_config.h
   player_evaluator.h
