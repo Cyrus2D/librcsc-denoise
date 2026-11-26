@@ -59,6 +59,7 @@
 #include <limits>
 #include <cassert>
 #include <cmath>
+#include <utility>
 
 // #define DEBUG_PROFILE
 // #define DEBUG_PRINT
@@ -2016,6 +2017,7 @@ WorldModel::updateJustBeforeDecision( const ActionEffector & act,
     updatePlayerType(); // have to be called after see message.
 
     updatePlayersCollision(); // have to be called after player type update.
+    updateDecisionPlayerPositions();
 
 #if 0
     // 2008-04-18: akiyama
@@ -2787,7 +2789,7 @@ WorldModel::addSeePlayerRecord( const int list,
                                 const int index,
                                 const Localization::PlayerT & player )
 {
-    // write-only record for the dataset logger. never read by the world model logic.
+    // Snapshot the visual localization before track matching or decision corrections.
     SeePlayerRecord r;
     r.list_ = list;
     r.index_ = index;
@@ -3934,13 +3936,88 @@ WorldModel::estimateUnknownPlayerUnum()
 
  */
 void
-WorldModel::updatePlayerStateCache()
+WorldModel::setPlayerPositionCorrector( PlayerPositionCorrector corrector )
+{
+    clearDecisionPlayerPositions();
+    M_player_position_corrector = std::move( corrector );
+}
+
+void
+WorldModel::updateDecisionPlayerPositions()
+{
+    if ( ! M_player_position_corrector )
+    {
+        return;
+    }
+
+    for ( const PlayerPositionCorrection & correction : M_player_position_corrector( *this ) )
+    {
+        const double shift2 = correction.delta.r2();
+        if ( correction.unum < 1 || correction.unum > 11
+             || ( correction.side != ourSide() && correction.side != theirSide() )
+             || ( correction.side == ourSide() && correction.unum == self().unum() )
+             || ! correction.visual.isValid() || ! correction.delta.isValid()
+             || ! std::isfinite( shift2 ) || shift2 <= 0.0 )
+        {
+            continue;
+        }
+
+        AbstractPlayerObject * p = correction.side == ourSide()
+            ? M_our_players_array[correction.unum]
+            : M_their_players_array[correction.unum];
+        // Keep any stock adjustment that has already moved the current observation.
+        if ( p && p->posCount() == 0
+             && ! p->hasDecisionPosition()
+             && p->trackedPos().dist2( correction.visual ) <= 1.0e-6 )
+        {
+            p->setDecisionPosition( p->trackedPos() + correction.delta );
+            M_has_decision_positions = true;
+        }
+    }
+
+    if ( M_has_decision_positions )
+    {
+        updatePlayerStateCache( false );
+    }
+}
+
+void
+WorldModel::clearDecisionPlayerPositions()
+{
+    if ( ! M_has_decision_positions )
+    {
+        return;
+    }
+
+    for ( PlayerObject & p : M_teammates ) p.clearDecisionPosition();
+    for ( PlayerObject & p : M_opponents ) p.clearDecisionPosition();
+    M_has_decision_positions = false;
+    updatePlayerStateCache( false );
+}
+
+void
+WorldModel::updatePlayerStateCache( const bool infer_identity )
 {
     if ( ! self().posValid()
          || ! ball().posValid() )
     {
         return;
     }
+
+    // The same decision can rebuild these lists after a position correction.
+    M_teammates_from_self.clear();
+    M_teammates_from_ball.clear();
+    M_opponents_from_self.clear();
+    M_opponents_from_ball.clear();
+    M_all_players.clear();
+    M_our_players.clear();
+    M_their_players.clear();
+    std::fill_n( M_our_players_array, 12, nullptr );
+    std::fill_n( M_their_players_array, 12, nullptr );
+    M_kickable_teammate = nullptr;
+    M_kickable_opponent = nullptr;
+    M_maybe_kickable_teammate = nullptr;
+    M_maybe_kickable_opponent = nullptr;
 
     //
     // create player reference container
@@ -3986,8 +4063,11 @@ WorldModel::updatePlayerStateCache()
                      return lhs->distFromBall() < rhs->distFromBall();
                  } );
 
-    estimateUnknownPlayerUnum();
-    estimateGoalie();
+    if ( infer_identity )
+    {
+        estimateUnknownPlayerUnum();
+        estimateGoalie();
+    }
 
     //
     // create known players array

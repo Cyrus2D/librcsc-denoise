@@ -757,7 +757,7 @@ Body_Dribble2008::doKickTurnsDashes( PlayerAgent * agent,
             }
 
             const Vector2D & opos = ( o->seenPosCount() <= o->posCount()
-                                      ? o->seenPos()
+                                      ? o->decisionPos( o->seenPos() )
                                       : o->pos() );
             const int vel_count = std::min( o->seenVelCount(), o->velCount() );
             const Vector2D & ovel = ( o->seenVelCount() <= o->velCount()

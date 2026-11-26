@@ -47,6 +47,7 @@
 #include <rcsc/game_time.h>
 #include <rcsc/types.h>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -107,7 +108,7 @@ public:
     };
 
     /*!
-      \brief localization result of one raw visual player entry. write-only record for the dataset logger.
+      \brief localization result of one raw visual player entry before fusion.
       list_: 0 = see opponents, 1 = unknown opponents, 2 = teammates, 3 = unknown teammates,
       4 = unknown players. index_ is the index in that list of VisualSensor.
      */
@@ -123,7 +124,25 @@ public:
         double dist_error_ = 0.0;
     };
 
+    struct PlayerPositionCorrection {
+        SideID side;
+        int unum;
+        Vector2D visual;
+        Vector2D delta;
+    };
+
+    using PlayerPositionCorrector =
+        std::function< std::vector< PlayerPositionCorrection >( const WorldModel & ) >;
+
+    //! Install an optional decision-only correction for fresh named visual tracks.
+    void setPlayerPositionCorrector( PlayerPositionCorrector corrector );
+    bool hasPlayerPositionCorrector() const { return bool( M_player_position_corrector ); }
+    void clearDecisionPlayerPositions();
+
 private:
+
+    PlayerPositionCorrector M_player_position_corrector;
+    bool M_has_decision_positions = false;
 
     double M_client_version;
 
@@ -666,7 +685,8 @@ private:
     /*!
       \brief update player info. relation with ball and self.
      */
-    void updatePlayerStateCache();
+    void updatePlayerStateCache( bool infer_identity = true );
+    void updateDecisionPlayerPositions();
 
     /*!
       \brief update our/their goalie

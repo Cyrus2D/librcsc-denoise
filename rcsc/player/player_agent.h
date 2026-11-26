@@ -185,6 +185,9 @@ public:
      */
     const FullstateSensor & fullstateSensor() const;
 
+    //! True when the default localizer is using acknowledged Gaussian visual ranges.
+    bool gaussianRangeLocalization() const;
+
     /*!
       \brief get see state
       \return const reference to the see state instance

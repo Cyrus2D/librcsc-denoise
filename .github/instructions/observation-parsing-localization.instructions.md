@@ -8,11 +8,11 @@ How `(see ...)` and `(sense_body ...)` become relative/global measurements with 
 
 ## TL;DR
 
-The parser keeps raw rounded values; `LocalizationDefault` converts them to positions with error bounds taken from a hard-coded quantization table, not from the noise-rate parameters.
+The parser preserves the reported values. The default localizer uses the quantization tables for quantized observations and the reported range with a Gaussian uncertainty interval after the server acknowledges Gaussian observations.
 
-- `VisualSensor::parse` has no quantized/Gaussian branch. `(gaussian_see)` is sent only if `PlayerConfig::gaussianSee()` (default false), and no code reads the noise rates.
+- `VisualSensor::parse` handles both wire formats. `PlayerAgent` sends `(gaussian_see)` when configured and activates the Gaussian range model after `(ok gaussian_see)`. The server exact-observation flags take precedence.
 - Self position uses a grid-point sector-intersection filter over flags (not triangulation). Ball and players are a single polar-to-Cartesian conversion with table error ranges.
-- `ObjectTable` uses the quantized static/movable tables; under Gaussian a seen distance snaps UP to the next table entry (bias). With the server param `see_noise_free` it instead uses the seen distance as the mean with `dist_error = 0.01` (`object_table.h:180-185`, `:211-216`).
+- `LocalizationDefault::Impl::distanceRange` uses the reported Gaussian distance for landmarks, ball and players. Its working half-width is twice the estimated sigma from the observing player type rates and the measured object/focus geometry. The ordinary paths still use `ObjectTable` and its exact-distance handling.
 - Player velocity is computed with "Not consider noise"; the self error is NOT added to player position.
 - **Open the full file when:** you change a parser field, an error bound, the see/sense_body timing logic, or add a Gaussian-aware error model.
 
@@ -52,7 +52,7 @@ The parser keeps raw rounded values; `LocalizationDefault` converts them to posi
   2. `updatePointsByMarkers` (361-390): intersect with each next marker (up to 30) - `updatePointsBy` (485-613) drops points outside the marker's `Sector2D`. `resamplePoints` (839-889) tops up to 50 with +-0.01 jitter, fixed-seed mt19937.
   3. Behind markers: `updatePointsByBehindMarker` (397-478) guesses the id with `getNearestMarker` (255) from the current estimate; re-filters up to 20 markers when the set is empty.
   4. `averagePoints` (620-693): `pos` = mean of points, `err` = half bounding-box extent (x, y).
-- **Ball** (`localizeBallRelative`, 1353-1559): takes `balls().front()`. `rpos = avg_dist*(cos,sin)(avg_dir)`; `rpos_err` = half extent of the 4 dist/dir corners (1441-1450). If `has_vel_`: 16 corner combos of `dist_chng/dist ± 0.01` (hard-coded 0.02 step, 1467-1474) x min/max dist and `dir_chng ± 0.05` (1477-1478); `rvel` = average, `rvel_err` = half extent. This assumes quantized steps 0.02/0.1.
+- **Ball** (`localizeBallRelative`, 1353-1559): takes `balls().front()`. `rpos = avg_dist*(cos,sin)(avg_dir)`; `rpos_err` = half extent of the 4 dist/dir corners (1441-1450). If `has_vel_`: 16 corner combos of `dist_chng/dist ± 0.01` (hard-coded 0.02 step, 1467-1474) x min/max dist and `dir_chng ± 0.05` (1477-1478); `rvel` = average, `rvel_err` = half extent. The Gaussian case uses a half-step of 0.005 m/cycle divided by the reported range for the radial ratio. At reported range zero it supplies position without a direct velocity estimate.
 - **Player** (`localizePlayer`, 1566-1671): `rpos` = polar of table-average distance; `dist_error_` = table error; `pos = self_pos + rpos` (self error NOT added); `vel = (dist_chng, rad(dir_chng)*avg_dist)` rotated by avg_dir plus `self_vel` (1622-1634, comment "Not consider noise" at 1621); body/face/arm are `+ self_face`; kicking/tackle copied.
 
 ## B2. `ObjectTable` (`object_table.cpp`, `object_table.h`)
@@ -66,14 +66,13 @@ The parser keeps raw rounded values; `LocalizationDefault` converts them to posi
 ## E. Mismatch vs server models
 
 - **Quantized (default):** bounds match the server model (`Q(.,0.1)` on log distance); the hard-coded 0.02/0.1 chg steps match.
-- **Gaussian (`gaussian_see`):** not modelled. A non-grid distance snaps UP to the next table entry (bias up to one bin: ~+-5 m at 100 m movable, ~1 m landmark). Table bounds (+-5% / +-0.5%) are about 2 sigma of `sigma = d*0.0125` at f=d, so ~4.6% of readings fall outside. Chg step becomes `0.01/nd`, not 0.02. (Inferred from the code, not runtime-tested.)
-- **Hook points:** replace the `lower_bound` lookups (`object_table.cpp:2322`, `:2353`) with a `sigma = d*rate + f*focus_rate` model fed from `ServerParam`/`PlayerType` (`player_type.h:86-89`, `:444-462`); change the hard-coded steps at `localization_default.cpp:1467-1478`; add `self.posError` to player `pos_error` at 1566-1671; keep the Gaussian switch at `player_agent.cpp:1336-1338`.
+- **Gaussian:** the range center is the reported distance. The existing sector and corner samplers use a two-sigma working interval (estimated from the measurement and focus), with nonnegative lower distance limits. Angle handling and the existing WM fusion still apply.
+- The Exp6 baseline used the old quantization lookup for Gaussian ranges. Its paired replay isolates the range error before the new live pilot also updates landmark localization.
 
 ## Not Found
 
-- No use of `dist_noise_rate`, `land_dist_noise_rate`, `focus_*_noise_rate` anywhere under `rcsc/player/` (grep).
 - No per-object `pos_error` in `PlayerObject` (only `dist_error_` in `Localization::PlayerT`, `localization.h:71`).
-- No handling of `focus_point` in localization (parsed in `body_sensor.cpp` only).
+
 
 ## See Also
 

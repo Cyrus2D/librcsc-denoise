@@ -58,7 +58,7 @@ get_pos( const PlayerObject & p )
 {
     return ( p.heardPosCount() <= p.seenPosCount() - 2
              ? p.heardPos()
-             : p.seenPos() );
+             : p.decisionPos( p.seenPos() ) );
 }
 
 /*-------------------------------------------------------------------*/

@@ -46,6 +46,7 @@
 #include <rcsc/math_util.h>
 
 #include <algorithm>
+#include <cmath>
 #include <random>
 
 using std::min;
@@ -78,6 +79,8 @@ private:
     //! grid point container
     std::vector< Vector2D > M_points;
 
+    bool M_gaussian_see = false;
+
 public:
     /*!
       \brief create landmark map and object table
@@ -107,6 +110,24 @@ public:
       {
           return M_points;
       }
+
+    void setGaussianSee( const bool enabled )
+      {
+          M_gaussian_see = enabled;
+      }
+
+    bool gaussianSeeActive() const
+      {
+          const ServerParam & server = ServerParam::i();
+          return M_gaussian_see && ! server.seeNoiseFree() && ! server.seeNoQuantization();
+      }
+
+    bool distanceRange( const WorldModel & wm,
+                        const double observed_distance,
+                        const double observed_direction,
+                        const bool landmark,
+                        double * mean_distance,
+                        double * distance_error ) const;
 
     //
     // self localization
@@ -246,6 +267,62 @@ public:
     */
     double getFaceDirByLines( const VisualSensor::LineCont & lines ) const;
 };
+
+bool
+LocalizationDefault::Impl::distanceRange( const WorldModel & wm,
+                                           const double observed_distance,
+                                           const double observed_direction,
+                                           const bool landmark,
+                                           double * mean_distance,
+                                           double * distance_error ) const
+{
+    if ( gaussianSeeActive() )
+    {
+        if ( ! std::isfinite( observed_distance ) || observed_distance < 0.0
+             || observed_distance == VisualSensor::DIST_ERR
+             || ! std::isfinite( observed_direction ) || observed_direction == VisualSensor::DIR_ERR )
+        {
+            return false;
+        }
+
+        const SelfObject & self = wm.self();
+        const PlayerType & type = self.playerType();
+        const double distance_rate = landmark ? type.landDistNoiseRate() : type.distNoiseRate();
+        const double focus_rate = landmark ? type.landFocusDistNoiseRate() : type.focusDistNoiseRate();
+
+        // Estimate d and f in the same local frame as the received measurement.
+        double focus_distance = observed_distance;
+        if ( wm.clientVersion() >= 18.0 && self.focusDist() > 0.0 )
+        {
+            focus_distance = Vector2D::polar2vector( observed_distance, observed_direction )
+                .dist( Vector2D::polar2vector( self.focusDist(), self.focusDir() ) );
+        }
+
+        *mean_distance = observed_distance;
+        // A two-sigma working interval for the existing sector/corner samplers.
+        *distance_error = std::max( 1.0e-6,
+                                    2.0 * ( observed_distance * distance_rate
+                                            + focus_distance * focus_rate ) );
+        return true;
+    }
+
+#ifdef USE_OBJECT_TABLE
+    if ( landmark )
+    {
+        return objectTable().getLandmarkDistanceRange( wm.clientVersion(), wm.self().viewWidth().type(),
+                                                        observed_distance, mean_distance, distance_error );
+    }
+    return objectTable().getDistanceRange( wm.clientVersion(), wm.self().viewWidth().type(),
+                                           observed_distance, mean_distance, distance_error );
+#else
+    const ServerParam & server = ServerParam::i();
+    inverseDistanceRange( wm.clientVersion(), wm.self().viewWidth().type(),
+                          observed_distance,
+                          landmark ? server.landmarkDistQuantizeStep() : server.distQuantizeStep(),
+                          mean_distance, distance_error );
+    return true;
+#endif
+}
 
 /*-------------------------------------------------------------------*/
 /*!
@@ -509,10 +586,7 @@ LocalizationDefault::Impl::updatePointsBy( const WorldModel & wm,
     double ave_dist, dist_error;
 
     // get distance range info
-#ifdef USE_OBJECT_TABLE
-    if ( ! objectTable().getLandmarkDistanceRange( wm.clientVersion(),
-                                                   wm.self().viewWidth().type(),
-                                                   marker.dist_, &ave_dist, &dist_error ) )
+    if ( ! distanceRange( wm, marker.dist_, marker.dir_, true, &ave_dist, &dist_error ) )
     {
         std::cerr << __FILE__ << " (updatePointsBy) unexpected marker distance "
                   << marker.dist_ << std::endl;
@@ -521,10 +595,6 @@ LocalizationDefault::Impl::updatePointsBy( const WorldModel & wm,
                       marker.dist_ );
         return;
     }
-#else
-    inverseDistanceRange( wm.clientVersion(), wm.self().viewWidth().type(),
-                          marker.dist_, ServerParam::i().landmarkDistQuantizeStep(), &ave_dist, &dist_error );
-#endif
 
     // get dir range info
     double ave_dir, dir_error;
@@ -535,7 +605,8 @@ LocalizationDefault::Impl::updatePointsBy( const WorldModel & wm,
     ////////////////////////////////////////////////////////////////////
     // create candidate sector
     const Sector2D sector( marker_pos, // base point
-                           ave_dist - dist_error, // min dist
+                           gaussianSeeActive() ? std::max( 0.0, ave_dist - dist_error )
+                                               : ave_dist - dist_error, // min dist
                            ave_dist + dist_error, // max dist
                            AngleDeg( ave_dir - dir_error ), // start left angle
                            AngleDeg( ave_dir + dir_error ) ); // end right angle
@@ -728,18 +799,11 @@ LocalizationDefault::Impl::generatePoints( const WorldModel & wm,
     // get sector range
 
     double ave_dist, dist_error;
-#ifdef USE_OBJECT_TABLE
-    if ( ! objectTable().getLandmarkDistanceRange( wm.clientVersion(),
-                                                   wm.self().viewWidth().type(),
-                                                   marker.dist_,  &ave_dist, &dist_error ) )
+    if ( ! distanceRange( wm, marker.dist_, marker.dir_, true, &ave_dist, &dist_error ) )
     {
         std::cerr << __FILE__ << " (generatePoints) marker dist error" << std::endl;
         return;
     }
-#else
-    inverseDistanceRange( wm.clientVersion(), wm.self().viewWidth().type(),
-                          marker.dist_, ServerParam::i().landmarkDistQuantizeStep(), &ave_dist, &dist_error );
-#endif
 
     double ave_dir, dir_error;
     getDirRange( marker.dir_,
@@ -749,8 +813,10 @@ LocalizationDefault::Impl::generatePoints( const WorldModel & wm,
     // reverse dir, because base point is marker point
     ave_dir += 180.0;
 
-    const double min_dist = ave_dist - dist_error;
-    const double dist_range = dist_error * 2.0;
+    const double min_dist = gaussianSeeActive() ? std::max( 0.0, ave_dist - dist_error )
+                                                 : ave_dist - dist_error;
+    const double dist_range = gaussianSeeActive() ? ave_dist + dist_error - min_dist
+                                                   : dist_error * 2.0;
     double dist_inc = std::max( 0.01, dist_error / 16.0 );
     const int dist_loop = bound( 2,
                                  static_cast< int >( std::ceil( dist_range / dist_inc ) ),
@@ -966,12 +1032,7 @@ LocalizationDefault::Impl::getFaceDirByMarkers( const WorldModel & wm,
     }
 
     double marker_dist1, marker_dist2, tmperr;
-#ifdef USE_OBJECT_TABLE
-    if ( ! objectTable().getLandmarkDistanceRange( wm.clientVersion(),
-                                                   wm.self().viewWidth().type(),
-                                                   markers.front().dist_,
-                                                   &marker_dist1,
-                                                   &tmperr ) )
+    if ( ! distanceRange( wm, markers.front().dist_, markers.front().dir_, true, &marker_dist1, &tmperr ) )
     {
 #ifdef DEBUG_PRINT
         dlog.addText( Logger::WORLD,
@@ -979,11 +1040,7 @@ LocalizationDefault::Impl::getFaceDirByMarkers( const WorldModel & wm,
 #endif
         return angle;
     }
-    if ( ! objectTable().getLandmarkDistanceRange( wm.clientVersion(),
-                                                   wm.self().viewWidth().type(),
-                                                   markers.back().dist_,
-                                                   &marker_dist2,
-                                                   &tmperr ) )
+    if ( ! distanceRange( wm, markers.back().dist_, markers.back().dir_, true, &marker_dist2, &tmperr ) )
     {
 #ifdef DEBUG_PRINT
         dlog.addText( Logger::WORLD,
@@ -991,12 +1048,6 @@ LocalizationDefault::Impl::getFaceDirByMarkers( const WorldModel & wm,
 #endif
         return angle;
     }
-#else
-    inverseDistanceRange( wm.clientVersion(), wm.self().viewWidth().type(),
-                          markers.front().dist_, ServerParam::i().landmarkDistQuantizeStep(), &marker_dist1, &tmperr );
-    inverseDistanceRange( wm.clientVersion(), wm.self().viewWidth().type(),
-                          markers.back().dist_, ServerParam::i().landmarkDistQuantizeStep(), &marker_dist2, &tmperr );
-#endif
 
     Vector2D rpos1 = Vector2D::polar2vector( marker_dist1, markers.front().dir_ );
     Vector2D rpos2 = Vector2D::polar2vector( marker_dist2, markers.back().dir_ );
@@ -1208,6 +1259,18 @@ LocalizationDefault::~LocalizationDefault()
 /*!
 
  */
+void
+LocalizationDefault::setGaussianSee( const bool enabled )
+{
+    M_impl->setGaussianSee( enabled );
+}
+
+bool
+LocalizationDefault::gaussianSeeActive() const
+{
+    return M_impl->gaussianSeeActive();
+}
+
 bool
 LocalizationDefault::updateBySenseBody( const BodySensor & )
 {
@@ -1369,11 +1432,8 @@ LocalizationDefault::localizeBallRelative( const WorldModel & wm,
     ////////////////////////////////////////////////////////////////////
     // get polar range info
     double average_dist, dist_error;
-#ifdef USE_OBJECT_TABLE
     // dist range
-    if ( ! M_impl->objectTable().getDistanceRange( wm.clientVersion(),
-                                                   wm.self().viewWidth().type(),
-                                                   ball.dist_, &average_dist, &dist_error ) )
+    if ( ! M_impl->distanceRange( wm, ball.dist_, ball.dir_, false, &average_dist, &dist_error ) )
     {
         std::cerr << __FILE__ << " (localizeBallRelative) unexpected ball distance "
                   << ball.dist_ << std::endl;
@@ -1382,10 +1442,6 @@ LocalizationDefault::localizeBallRelative( const WorldModel & wm,
                       ball.dist_ );
         return false;
     }
-#else
-    M_impl->inverseDistanceRange( wm.clientVersion(), wm.self().viewWidth().type(),
-                                  ball.dist_, ServerParam::i().distQuantizeStep(), &average_dist, &dist_error );
-#endif
 
     // dlog.addText( Logger::WORLD,
     //               __FILE__" (localizeBallRelative) self_face=%.1f err=%.3f",
@@ -1397,8 +1453,10 @@ LocalizationDefault::localizeBallRelative( const WorldModel & wm,
                          self_face, self_face_err,
                          &average_dir, &dir_error );
 
+    const bool gaussian = gaussianSeeActive();
     const double max_dist = average_dist + dist_error;
-    const double min_dist = average_dist - dist_error;
+    const double min_dist = gaussian ? std::max( 0.0, average_dist - dist_error )
+                                     : average_dist - dist_error;
     const AngleDeg max_ang = average_dir + dir_error;
     const AngleDeg min_ang = average_dir - dir_error;
 
@@ -1461,17 +1519,20 @@ LocalizationDefault::localizeBallRelative( const WorldModel & wm,
 
     ////////////////////////////////////////////////////////////////////
     // get velocity
-    if ( ball.has_vel_ )
+    if ( ball.has_vel_ && ( ! gaussian || ball.dist_ > 0.0 ) )
     {
+        // Gaussian dist_chng is rounded to 0.01 m/cycle after scaling by
+        // observed distance. The quantized model rounds the ratio itself.
+        const double radial_half_step = gaussian ? 0.005 / ball.dist_ : 0.02 * 0.5;
         double max_dist_dist_chg1
-            = ( ball.dist_chng_ / ball.dist_ + 0.02*0.5 ) * max_dist;
+            = ( ball.dist_chng_ / ball.dist_ + radial_half_step ) * max_dist;
         double max_dist_dist_chg2
-            = ( ball.dist_chng_ / ball.dist_ - 0.02*0.5 ) * max_dist;
+            = ( ball.dist_chng_ / ball.dist_ - radial_half_step ) * max_dist;
 
         double min_dist_dist_chg1
-            = ( ball.dist_chng_ / ball.dist_ + 0.02*0.5 ) * min_dist;
+            = ( ball.dist_chng_ / ball.dist_ + radial_half_step ) * min_dist;
         double min_dist_dist_chg2
-            = ( ball.dist_chng_ / ball.dist_ - 0.02*0.5 ) * min_dist;
+            = ( ball.dist_chng_ / ball.dist_ - radial_half_step ) * min_dist;
 
         // qstep_dir = 0.1
         double max_dir_chg = ball.dir_chng_ + ( 0.1 * 0.5 );
@@ -1574,10 +1635,7 @@ LocalizationDefault::localizePlayer( const WorldModel & wm,
     ////////////////////////////////////////////////////////////////////
     // get polar range info
     double average_dist, dist_error;
-#ifdef USE_OBJECT_TABLE
-    if ( ! M_impl->objectTable().getDistanceRange( wm.clientVersion(),
-                                                   wm.self().viewWidth(),
-                                                   from.dist_, &average_dist, &dist_error ) )
+    if ( ! M_impl->distanceRange( wm, from.dist_, from.dir_, false, &average_dist, &dist_error ) )
     {
         std::cerr << __FILE__ << " (localizePlayer) Unexpected player distance "
                   << from.dist_ << std::endl;
@@ -1586,10 +1644,6 @@ LocalizationDefault::localizePlayer( const WorldModel & wm,
                       from.dist_ );
         return false;
     }
-#else
-    M_impl->inverseDistanceRange( wm.clientVersion(), wm.self().viewWidth().type(),
-                                  from.dist_, ServerParam::i().distQuantizeStep(), &average_dist, &dist_error );
-#endif
 
     double average_dir, dir_error;
 

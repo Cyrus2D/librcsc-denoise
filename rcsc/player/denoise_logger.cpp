@@ -174,6 +174,7 @@ const char * const COLS_OBJECTS =
     "ls_rpos_x,ls_rpos_y,ls_rpos_err_x,ls_rpos_err_y,ls_rvel_x,ls_rvel_y,ls_rvel_err_x,ls_rvel_err_y,ls_dist_error,"
     "track_found,track_match,track_match_dist,trk_unum_known,trk_pos_x,trk_pos_y,trk_vel_x,trk_vel_y,"
     "trk_body,trk_face,trk_pos_err_x,trk_pos_err_y,trk_vel_err_x,trk_vel_err_y,"
+    "trk_stock_pos_x,trk_stock_pos_y,trk_decision_pos_applied,"
     "trk_pos_count,trk_seen_pos_count,trk_vel_count,trk_seen_vel_count,trk_body_count,trk_face_count,"
     "trk_is_ghost,trk_ghost_count,trk_lost_count,"
     "trk_heard_pos_x,trk_heard_pos_y,trk_heard_pos_count,trk_heard_vel_x,trk_heard_vel_y,trk_heard_vel_count,"
@@ -1284,13 +1285,16 @@ DenoiseLogger::Impl::writeMeta( const bool final_write )
     os << "  \"config\": {\n";
     os << "    \"version\": " << cfg.version() << ",\n";
     os << "    \"gaussian_see\": " << ( cfg.gaussianSee() ? "true" : "false" ) << ",\n";
+    os << "    \"gaussian_range_localization\": " << ( agent_.gaussianRangeLocalization() ? "true" : "false" ) << ",\n";
+    os << "    \"player_position_corrector\": " << ( agent_.world().hasPlayerPositionCorrector() ? "true" : "false" ) << ",\n";
     os << "    \"use_fullstate\": " << ( cfg.useFullstate() ? "true" : "false" ) << ",\n";
     os << "    \"debug_fullstate\": " << ( cfg.debugFullstate() ? "true" : "false" ) << ",\n";
     os << "    \"synch_see\": " << ( cfg.synchSee() ? "true" : "false" ) << ",\n";
     os << "    \"denoise_log_landmarks\": " << ( cfg.denoiseLogLandmarks() ? "true" : "false" ) << ",\n";
     os << "    \"denoise_log_raw\": " << ( cfg.denoiseLogRaw() ? "true" : "false" ) << ",\n";
     os << "    \"full_view\": " << ( ServerParam::i().fullView() ? "true" : "false" ) << ",\n";
-    os << "    \"see_noise_free\": " << ( ServerParam::i().seeNoiseFree() ? "true" : "false" ) << "\n";
+    os << "    \"see_noise_free\": " << ( ServerParam::i().seeNoiseFree() ? "true" : "false" ) << ",\n";
+    os << "    \"see_no_quantization\": " << ( ServerParam::i().seeNoQuantization() ? "true" : "false" ) << "\n";
     os << "  },\n";
 
     os << "  \"player_type_id\": " << self_type.id() << ",\n";
@@ -2291,6 +2295,11 @@ DenoiseLogger::Impl::writeObjects()
                     r.xy( "trk_pos_x", "trk_pos_y", g( p->pos() ) )
                         .i( "trk_pos_count", p->posCount() )
                         .i( "trk_seen_pos_count", p->seenPosCount() );
+                }
+                r.b( "trk_decision_pos_applied", p->hasDecisionPosition() );
+                if ( p->hasDecisionPosition() )
+                {
+                    r.xy( "trk_stock_pos_x", "trk_stock_pos_y", g( p->trackedPos() ) );
                 }
                 if ( p->velValid() )
                 {

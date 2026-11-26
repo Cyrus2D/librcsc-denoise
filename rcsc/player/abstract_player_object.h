@@ -69,6 +69,7 @@ protected:
     Card M_card; //!< card information
 
     Vector2D M_pos; //!< global coordinate
+    Vector2D M_decision_pos{ Vector2D::INVALIDATED };
     int M_pos_count; //!< main accuracy counter
 
     Vector2D M_seen_pos; //!< last seen global coordinate
@@ -285,8 +286,24 @@ public:
     */
     const Vector2D & pos() const
     {
-        return M_pos;
+        return decisionPos( M_pos );
     }
+
+    //! Fused tracker position before the optional decision correction.
+    const Vector2D & trackedPos() const { return M_pos; }
+    bool hasDecisionPosition() const { return M_decision_pos.isValid(); }
+
+    const Vector2D & decisionPos( const Vector2D & fallback ) const
+      {
+          return hasDecisionPosition() ? M_decision_pos : fallback;
+      }
+
+private:
+    friend class WorldModel;
+    void setDecisionPosition( const Vector2D & pos ) { M_decision_pos = pos; }
+    void clearDecisionPosition() { M_decision_pos.invalidate(); }
+
+public:
 
     /*!
       \brief get global position accuracy

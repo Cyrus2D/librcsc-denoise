@@ -110,6 +110,8 @@ struct PlayerAgent::Impl {
     BodySensor body_;
     //! see info
     VisualSensor visual_;
+    //! Default see localizer, if still owned by the world model.
+    std::weak_ptr< LocalizationDefault > default_localization_;
     //! hear info
     AudioSensor audio_;
     //! fullstate info
@@ -769,6 +771,13 @@ PlayerAgent::fullstateSensor() const
     return M_impl->fullstate_;
 }
 
+bool
+PlayerAgent::gaussianRangeLocalization() const
+{
+    const auto localization = M_impl->default_localization_.lock();
+    return localization && localization->gaussianSeeActive();
+}
+
 /*-------------------------------------------------------------------*/
 /*!
 
@@ -862,7 +871,9 @@ PlayerAgent::initImpl( CmdLineParser & cmd_parser )
     AudioCodec::instance().createMap( config().audioShift() );
 
 
-    M_worldmodel.setLocalization( std::shared_ptr< Localization >( new LocalizationDefault() ) );
+    auto localization = std::make_shared< LocalizationDefault >();
+    M_impl->default_localization_ = localization;
+    M_worldmodel.setLocalization( localization );
     M_fullstate_worldmodel.setLocalization( std::shared_ptr< Localization >( new LocalizationDefault() ) );
 
     if ( ! config().denoiseLogDir().empty() )
@@ -2326,6 +2337,10 @@ PlayerAgent::Impl::analyzeOK( const char * msg )
                          "(ok gaussian_see)",
                          std::strlen( "(ok gaussian_see)" ) ) )
     {
+        if ( auto localization = default_localization_.lock() )
+        {
+            localization->setGaussianSee( true );
+        }
         std::cerr << agent_.world().teamName() << ' '
                   << agent_.world().self().unum() << ": "
                   << agent_.world().time()
@@ -2568,6 +2583,7 @@ PlayerAgent::action()
     // debugger output
     //
     M_impl->printDebug();
+    M_worldmodel.clearDecisionPlayerPositions();
 
     // delete all command objects and say messages
     M_effector.clearAllCommands();

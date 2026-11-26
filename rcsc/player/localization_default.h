@@ -68,6 +68,12 @@ public:
     virtual
     ~LocalizationDefault();
 
+    //! Enable after the server acknowledges Gaussian observations.
+    void setGaussianSee( bool enabled );
+
+    //! Whether the Gaussian range model is active for the current server settings.
+    bool gaussianSeeActive() const;
+
 public:
 
    /*!
